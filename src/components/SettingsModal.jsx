@@ -128,6 +128,53 @@ export default function SettingsModal({ onClose }) {
                       />
                     </div>
                   </div>
+
+                  <div className="settings-api-card">
+                    <div className="settings-api-header">
+                      <div className="settings-api-icon">
+                        <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>cloud</span>
+                      </div>
+                      <span className="settings-api-name">Tencent Cloud</span>
+                    </div>
+                    <div className="settings-input-group">
+                      <label className="settings-label">Secret Id</label>
+                      <input
+                        type="text"
+                        className="settings-input"
+                        placeholder="Enter Tencent Cloud Secret Id"
+                        value={localSettings?.apis?.tencentcloud?.secretId || ''}
+                        onChange={e => setLocalSettings(prev => ({
+                          ...prev,
+                          apis: {
+                            ...prev?.apis,
+                            tencentcloud: {
+                              ...prev?.apis?.tencentcloud,
+                              secretId: e.target.value
+                            }
+                          }
+                        }))}
+                      />
+                    </div>
+                    <div className="settings-input-group">
+                      <label className="settings-label">Secret Key</label>
+                      <input
+                        type="password"
+                        className="settings-input"
+                        placeholder="Enter Tencent Cloud Secret Key"
+                        value={localSettings?.apis?.tencentcloud?.secretKey || ''}
+                        onChange={e => setLocalSettings(prev => ({
+                          ...prev,
+                          apis: {
+                            ...prev?.apis,
+                            tencentcloud: {
+                              ...prev?.apis?.tencentcloud,
+                              secretKey: e.target.value
+                            }
+                          }
+                        }))}
+                      />
+                    </div>
+                  </div>
                 </div>
               </section>
 

@@ -9,6 +9,7 @@ import fs from 'fs/promises';
 import si from 'systeminformation';
 import { exec } from 'child_process';
 import util from 'util';
+import tencentcloudSdk from 'tencentcloud-sdk-nodejs-intl-en';
 import {
   ASSETS_DIR,
   DATA_DIR,
@@ -78,6 +79,13 @@ const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bm
 const MESH_EXTENSIONS = new Set(['.glb', '.gltf', '.obj', '.fbx', '.stl', '.ply']);
 const comfyProgressSubscribers = new Map();
 const comfyProgressSnapshots = new Map();
+const TENCENT_MESH_GENERATION_API_ID = 'tencent_meshgeneration';
+const TENCENT_HUNYUAN_ENDPOINT = 'hunyuan.intl.tencentcloudapi.com';
+const TENCENT_HUNYUAN_VERSION = '2023-09-01';
+const TENCENT_REGIONS = new Set(['ap-singapore', 'eu-frankfurt', 'na-siliconvalley']);
+const TENCENT_MODEL_VERSIONS = new Set(['3.0', '3.1']);
+const TENCENT_GENERATION_TYPES = new Set(['Normal', 'LowPoly', 'Geometry']);
+const TENCENT_POLYGON_TYPES = new Set(['triangle', 'quadrilaterial']);
 
 console.log('DEBUG: DATA_DIR is', DATA_DIR);
 console.log('DEBUG: DB_FILE is', path.join(DATA_DIR, 'app.db'));
@@ -341,6 +349,18 @@ const INITIAL_SCHEMA = {
         }
       },
       openai: { apiKey: '' },
+      tencentcloud: {
+        secretId: '',
+        secretKey: '',
+        meshGeneration: {
+          models: {
+            meshgeneration: {
+              name: 'Hunyuan3D Pro',
+              model: 'meshgeneration'
+            }
+          }
+        }
+      },
       comfyui: {
         path: '',
         url: 'http://127.0.0.1',
@@ -366,7 +386,8 @@ async function updateCardProcessingSnapshot(projectId, cardId, {
   operationType = 'workflow',
   workflowId = null,
   workflowName = null,
-  startedAt = Date.now()
+  startedAt = Date.now(),
+  ...processingMetadata
 } = {}) {
   if (!projectId || !cardId) {
     return null;
@@ -379,6 +400,7 @@ async function updateCardProcessingSnapshot(projectId, cardId, {
     progress: Number.isFinite(progressPercent) ? Math.max(0, Math.min(100, Math.round(progressPercent))) : null,
     processing: {
       status,
+      name,
       progressPercent: Number.isFinite(progressPercent) ? Math.max(0, Math.min(100, Math.round(progressPercent))) : null,
       detail,
       currentNodeLabel,
@@ -388,7 +410,8 @@ async function updateCardProcessingSnapshot(projectId, cardId, {
       workflowId,
       workflowName,
       startedAt,
-      updatedAt: Date.now()
+      updatedAt: Date.now(),
+      ...processingMetadata
     },
     creationDate: startedAt
   });
@@ -1172,6 +1195,295 @@ function getCustomApiConfig(settings, selectedApi, expectedType = null) {
     ...customApi,
     type: normalizedType
   };
+}
+
+function isTencentMeshGenerationApi(selectedApi = '') {
+  return String(selectedApi || '').trim() === TENCENT_MESH_GENERATION_API_ID;
+}
+
+function getTencentCloudConfig(settings = {}) {
+  const providerSettings = settings?.apis?.tencentcloud || {};
+
+  return {
+    secretId: String(providerSettings.secretId || '').trim(),
+    secretKey: String(providerSettings.secretKey || '').trim(),
+    meshGeneration: {
+      models: {
+        meshgeneration: {
+          name: providerSettings?.meshGeneration?.models?.meshgeneration?.name || 'Hunyuan3D Pro',
+          model: providerSettings?.meshGeneration?.models?.meshgeneration?.model || 'meshgeneration'
+        }
+      }
+    }
+  };
+}
+
+function normalizeTencentBoolean(value, fallback = false) {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  if (value === null || value === undefined || value === '') {
+    return fallback;
+  }
+
+  if (typeof value === 'string') {
+    const normalizedValue = value.trim().toLowerCase();
+    if (normalizedValue === 'true') return true;
+    if (normalizedValue === 'false') return false;
+  }
+
+  return Boolean(value);
+}
+
+function normalizeTencentFaceCount(value, fallback = 500000) {
+  if (value === null || value === undefined || value === '') {
+    return fallback;
+  }
+
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) ? Math.round(numericValue) : fallback;
+}
+
+function normalizeTencentMeshGenerationInput({
+  prompt,
+  hasImageSource = false,
+  region,
+  modelVersion,
+  enablePBR,
+  faceCount,
+  generationType,
+  polygonType
+} = {}) {
+  const trimmedPrompt = String(prompt || '').trim();
+  const hasPrompt = Boolean(trimmedPrompt);
+  const regionValue = String(region || '').trim();
+  const normalizedRegion = TENCENT_REGIONS.has(regionValue) ? regionValue : null;
+  const normalizedModelVersion = TENCENT_MODEL_VERSIONS.has(String(modelVersion || '').trim())
+    ? String(modelVersion || '').trim()
+    : '3.0';
+  const normalizedGenerationType = TENCENT_GENERATION_TYPES.has(String(generationType || '').trim())
+    ? String(generationType || '').trim()
+    : 'Normal';
+  const normalizedPolygonType = TENCENT_POLYGON_TYPES.has(String(polygonType || '').trim())
+    ? String(polygonType || '').trim()
+    : 'triangle';
+  const normalizedFaceCount = normalizeTencentFaceCount(faceCount);
+  const normalizedEnablePBR = normalizeTencentBoolean(enablePBR, false);
+
+  if (!normalizedRegion) {
+    throw new Error('Tencent Cloud region must be ap-singapore, eu-frankfurt, or na-siliconvalley');
+  }
+
+  if (hasPrompt === hasImageSource) {
+    throw new Error('Provide either a prompt or an image input for Tencent Cloud mesh generation');
+  }
+
+  if (normalizedFaceCount < 3000 || normalizedFaceCount > 1500000) {
+    throw new Error('Tencent Cloud FaceCount must be between 3000 and 1500000');
+  }
+
+  if (normalizedGenerationType === 'LowPoly' && normalizedModelVersion !== '3.0') {
+    throw new Error('Tencent Cloud LowPoly generation is only available with model 3.0');
+  }
+
+  return {
+    trimmedPrompt,
+    normalizedRegion,
+    normalizedModelVersion,
+    normalizedEnablePBR,
+    normalizedFaceCount,
+    normalizedGenerationType,
+    normalizedPolygonType,
+    hasPrompt,
+    hasImageSource
+  };
+}
+
+function createTencentCloudClient({ secretId, secretKey, region }) {
+  if (!secretId || !secretKey) {
+    throw new Error('Tencent Cloud Secret Id and Secret Key are required');
+  }
+
+  const tencentcloud = tencentcloudSdk?.default || tencentcloudSdk;
+  const { Credential, ClientProfile, HttpProfile, CommonClient } = tencentcloud.common;
+  const credential = new Credential(secretId, secretKey);
+  const httpProfile = new HttpProfile();
+  httpProfile.endpoint = TENCENT_HUNYUAN_ENDPOINT;
+  const clientProfile = new ClientProfile();
+  clientProfile.httpProfile = httpProfile;
+
+  return new CommonClient(TENCENT_HUNYUAN_ENDPOINT, TENCENT_HUNYUAN_VERSION, credential, region, clientProfile);
+}
+
+async function requestTencentCloud(client, action, params) {
+  return await new Promise((resolve, reject) => {
+    client.request(action, JSON.stringify(params), (err, response) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+
+      resolve(response || {});
+    });
+  });
+}
+
+async function submitTencentCloudMeshGenerationJob(settings, {
+  region,
+  modelVersion = '3.0',
+  prompt = '',
+  imageBuffer = null,
+  enablePBR = false,
+  faceCount = 500000,
+  generationType = 'Normal',
+  polygonType = 'triangle'
+} = {}) {
+  const providerConfig = getTencentCloudConfig(settings);
+  const client = createTencentCloudClient({
+    secretId: providerConfig.secretId,
+    secretKey: providerConfig.secretKey,
+    region
+  });
+  const params = {
+    Model: modelVersion,
+    EnablePBR: Boolean(enablePBR),
+    FaceCount: faceCount,
+    GenerateType: generationType
+  };
+
+  if (prompt) {
+    params.Prompt = prompt;
+  }
+
+  if (imageBuffer) {
+    params.ImageBase64 = imageBuffer.toString('base64');
+  }
+
+  if (generationType === 'LowPoly') {
+    params.PolygonType = polygonType;
+  }
+
+  const response = await requestTencentCloud(client, 'SubmitHunyuanTo3DProJob', params);
+  const payload = response?.Response || {};
+
+  if (!payload.JobId) {
+    throw new Error(payload.ErrorMessage || 'Tencent Cloud mesh generation did not return a job id');
+  }
+
+  return {
+    jobId: String(payload.JobId),
+    requestId: payload.RequestId || null
+  };
+}
+
+async function queryTencentCloudMeshGenerationJob(settings, { region, jobId } = {}) {
+  const providerConfig = getTencentCloudConfig(settings);
+  const client = createTencentCloudClient({
+    secretId: providerConfig.secretId,
+    secretKey: providerConfig.secretKey,
+    region
+  });
+  const response = await requestTencentCloud(client, 'QueryHunyuanTo3DProJob', {
+    JobId: String(jobId || '').trim()
+  });
+  const payload = response?.Response || {};
+
+  return {
+    requestId: payload.RequestId || null,
+    status: String(payload.Status || '').trim() || 'WAIT',
+    errorCode: String(payload.ErrorCode || '').trim(),
+    errorMessage: String(payload.ErrorMessage || '').trim(),
+    resultFiles: Array.isArray(payload.ResultFile3Ds) ? payload.ResultFile3Ds : []
+  };
+}
+
+async function downloadTencentCloudResultFiles(resultFiles = []) {
+  const downloadedFiles = [];
+
+  for (const [index, resultFile] of resultFiles.entries()) {
+    if (!resultFile?.Url) {
+      continue;
+    }
+
+    const response = await fetch(resultFile.Url);
+    if (!response.ok) {
+      throw new Error(`Failed to download Tencent Cloud mesh result (${response.status})`);
+    }
+
+    const contentType = response.headers.get('content-type') || 'application/octet-stream';
+    const buffer = Buffer.from(await response.arrayBuffer());
+    const extension = path.extname(getFilenameFromUrl(resultFile.Url, '')).replace('.', '') || getExtensionFromContentType(contentType, 'glb');
+    const filename = getFilenameFromUrl(resultFile.Url, `generated_mesh_${index + 1}.${extension}`);
+
+    downloadedFiles.push({
+      buffer,
+      contentType,
+      filename,
+      previewImageUrl: resultFile.PreviewImageUrl || '',
+      resultType: resultFile.Type || ''
+    });
+  }
+
+  return downloadedFiles;
+}
+
+async function saveGeneratedMeshAssets({
+  projectId,
+  name,
+  cardId = null,
+  provider = 'API',
+  prompt = '',
+  metadata = {},
+  downloadedFiles = []
+} = {}) {
+  const savedAssets = [];
+
+  for (const [index, downloadedFile] of downloadedFiles.entries()) {
+    const extension = path.extname(downloadedFile.filename).replace('.', '') || getExtensionFromContentType(downloadedFile.contentType, 'glb');
+    const filename = `${Date.now()}-${Math.round(Math.random() * 1E9)}-${index}.${extension}`;
+    const storedFilePath = toStoredAssetPath('mesh', filename);
+    const absoluteFilePath = toAbsoluteStoragePath(storedFilePath);
+
+    await fs.mkdir(path.dirname(absoluteFilePath), { recursive: true });
+    await fs.writeFile(absoluteFilePath, downloadedFile.buffer);
+
+    savedAssets.push(await createProjectAsset({
+      projectId: Number(projectId),
+      type: 'mesh',
+      name: downloadedFiles.length > 1 ? `${name} ${index + 1}` : name,
+      filePath: storedFilePath,
+      metadata: {
+        format: extension.toUpperCase(),
+        source: provider,
+        provider,
+        prompt,
+        cardId,
+        previewImageUrl: downloadedFile.previewImageUrl || null,
+        resultType: downloadedFile.resultType || null,
+        ...metadata
+      },
+      createdAt: Date.now() + index
+    }));
+  }
+
+  return savedAssets;
+}
+
+function getTencentJobRuntimeLabel(jobStatus = 'WAIT') {
+  if (jobStatus === 'RUN') {
+    return 'Tencent Cloud job is running';
+  }
+
+  if (jobStatus === 'WAIT') {
+    return 'Tencent Cloud job is queued';
+  }
+
+  if (jobStatus === 'DONE') {
+    return 'Tencent Cloud job finished';
+  }
+
+  return 'Tencent Cloud job failed';
 }
 
 function getNestedValue(value, pathExpression = '') {
@@ -2094,28 +2406,133 @@ app.post('/api/meshes/generate', async (req, res) => {
   let processingStartedAt = Date.now();
 
   try {
-    const { projectId, selectedApi, prompt, name, imageSource, cardId } = req.body;
+    const {
+      projectId,
+      selectedApi,
+      prompt,
+      name,
+      imageSource,
+      cardId,
+      region,
+      modelVersion,
+      enablePBR,
+      faceCount,
+      generationType,
+      polygonType
+    } = req.body;
     const trimmedName = String(name || '').trim();
     const trimmedPrompt = String(prompt || '').trim();
+    const isTencentMeshApi = isTencentMeshGenerationApi(selectedApi);
 
-    if (!projectId || !selectedApi || !trimmedPrompt || !trimmedName) {
-      return res.status(400).json({ error: 'projectId, selectedApi, prompt and name are required' });
+    if (!projectId || !selectedApi || !trimmedName) {
+      return res.status(400).json({ error: 'projectId, selectedApi and name are required' });
     }
 
-    if (!String(selectedApi).startsWith('custom_')) {
+    if (!isTencentMeshApi && !trimmedPrompt) {
+      return res.status(400).json({ error: 'prompt is required for mesh generation' });
+    }
+
+    if (!isTencentMeshApi && !String(selectedApi).startsWith('custom_')) {
       return res.status(400).json({ error: 'Mesh generation currently supports custom APIs only' });
     }
 
-    const resolvedSource = await resolveProjectImageSource(Number(projectId), imageSource);
-    const sourceAsset = resolvedSource?.asset;
-    if (!resolvedSource || !sourceAsset || sourceAsset.type !== 'image') {
-      return res.status(404).json({ error: 'Source image or edit not found' });
+    let resolvedSource = null;
+    let sourceAsset = null;
+    if (imageSource) {
+      resolvedSource = await resolveProjectImageSource(Number(projectId), imageSource);
+      sourceAsset = resolvedSource?.asset;
+
+      if (!resolvedSource || !sourceAsset || sourceAsset.type !== 'image') {
+        return res.status(404).json({ error: 'Source image or edit not found' });
+      }
     }
 
     processingProjectId = Number(projectId);
-    processingCardId = cardId || sourceAsset.metadata?.cardId || randomUUID();
+    processingCardId = cardId || sourceAsset?.metadata?.cardId || randomUUID();
     processingCardName = trimmedName;
     processingStartedAt = Date.now();
+
+    const settings = await getSettings();
+
+    if (isTencentMeshApi) {
+      const validatedInput = normalizeTencentMeshGenerationInput({
+        prompt: trimmedPrompt,
+        hasImageSource: Boolean(resolvedSource),
+        region,
+        modelVersion,
+        enablePBR,
+        faceCount,
+        generationType,
+        polygonType
+      });
+      const sourceFilePath = resolvedSource ? toAbsoluteStoragePath(resolvedSource.inputFilePath) : null;
+      const sourceBuffer = sourceFilePath ? await fs.readFile(sourceFilePath) : null;
+
+      await updateCardProcessingSnapshot(processingProjectId, processingCardId, {
+        columnName: 'Mesh Gen',
+        name: processingCardName,
+        status: 'processing',
+        progressPercent: null,
+        detail: 'Submitting Tencent Cloud mesh generation job',
+        currentNodeLabel: 'Waiting for Tencent Cloud job id',
+        source: 'Tencent Cloud',
+        operationType: 'mesh-generation',
+        startedAt: processingStartedAt,
+        selectedApi,
+        region: validatedInput.normalizedRegion,
+        modelVersion: validatedInput.normalizedModelVersion,
+        generationType: validatedInput.normalizedGenerationType,
+        polygonType: validatedInput.normalizedGenerationType === 'LowPoly' ? validatedInput.normalizedPolygonType : null,
+        enablePBR: validatedInput.normalizedEnablePBR,
+        faceCount: validatedInput.normalizedFaceCount,
+        inputSource: imageSource || null
+      });
+
+      const submittedJob = await submitTencentCloudMeshGenerationJob(settings, {
+        region: validatedInput.normalizedRegion,
+        modelVersion: validatedInput.normalizedModelVersion,
+        prompt: validatedInput.hasPrompt ? validatedInput.trimmedPrompt : '',
+        imageBuffer: sourceBuffer,
+        enablePBR: validatedInput.normalizedEnablePBR,
+        faceCount: validatedInput.normalizedFaceCount,
+        generationType: validatedInput.normalizedGenerationType,
+        polygonType: validatedInput.normalizedPolygonType
+      });
+
+      await updateCardProcessingSnapshot(processingProjectId, processingCardId, {
+        columnName: 'Mesh Gen',
+        name: processingCardName,
+        status: 'processing',
+        progressPercent: null,
+        detail: 'Tencent Cloud job submitted. Use GET RESULT to refresh status.',
+        currentNodeLabel: getTencentJobRuntimeLabel('WAIT'),
+        source: 'Tencent Cloud',
+        operationType: 'mesh-generation',
+        startedAt: processingStartedAt,
+        promptId: submittedJob.jobId,
+        selectedApi,
+        region: validatedInput.normalizedRegion,
+        modelVersion: validatedInput.normalizedModelVersion,
+        generationType: validatedInput.normalizedGenerationType,
+        polygonType: validatedInput.normalizedGenerationType === 'LowPoly' ? validatedInput.normalizedPolygonType : null,
+        enablePBR: validatedInput.normalizedEnablePBR,
+        faceCount: validatedInput.normalizedFaceCount,
+        jobId: submittedJob.jobId,
+        jobStatus: 'WAIT',
+        inputSource: imageSource || null
+      });
+
+      return res.status(202).json({
+        status: 'queued',
+        provider: 'Tencent Cloud',
+        selectedApi,
+        jobId: submittedJob.jobId,
+        requestId: submittedJob.requestId,
+        region: validatedInput.normalizedRegion,
+        name: trimmedName,
+        cardId: processingCardId
+      });
+    }
 
     await updateCardProcessingSnapshot(processingProjectId, processingCardId, {
       columnName: 'Mesh Gen',
@@ -2129,7 +2546,6 @@ app.post('/api/meshes/generate', async (req, res) => {
       startedAt: processingStartedAt
     });
 
-    const settings = await getSettings();
     const customApi = getCustomApiConfig(settings, selectedApi, 'mesh-generation');
     const sourceFilePath = toAbsoluteStoragePath(resolvedSource.inputFilePath);
     const sourceBuffer = await fs.readFile(sourceFilePath);
@@ -2214,6 +2630,132 @@ app.post('/api/meshes/generate', async (req, res) => {
       });
     }
     res.status(500).json({ error: err.message || 'Failed to run mesh generation API' });
+  }
+});
+
+app.post('/api/meshes/generate/tencent/result', async (req, res) => {
+  try {
+    const { projectId, jobId, region, name, prompt = '', cardId = null, selectedApi = TENCENT_MESH_GENERATION_API_ID } = req.body;
+    const trimmedName = String(name || '').trim();
+
+    if (!projectId || !jobId || !region || !trimmedName) {
+      return res.status(400).json({ error: 'projectId, jobId, region and name are required' });
+    }
+
+    const normalizedRegion = TENCENT_REGIONS.has(String(region || '').trim()) ? String(region || '').trim() : null;
+    if (!normalizedRegion) {
+      return res.status(400).json({ error: 'Invalid Tencent Cloud region' });
+    }
+
+    const settings = await getSettings();
+    const jobResult = await queryTencentCloudMeshGenerationJob(settings, {
+      region: normalizedRegion,
+      jobId
+    });
+
+    if (jobResult.status === 'FAIL') {
+      if (projectId && cardId) {
+        await updateCardProcessingSnapshot(Number(projectId), cardId, {
+          columnName: 'Mesh Gen',
+          name: trimmedName,
+          status: 'error',
+          progressPercent: null,
+          detail: jobResult.errorMessage || jobResult.errorCode || 'Tencent Cloud mesh generation failed',
+          currentNodeLabel: getTencentJobRuntimeLabel('FAIL'),
+          source: 'Tencent Cloud',
+          operationType: 'mesh-generation',
+          selectedApi,
+          region: normalizedRegion,
+          promptId: String(jobId),
+          jobId: String(jobId),
+          jobStatus: 'FAIL'
+        });
+      }
+
+      return res.json({
+        status: 'error',
+        provider: 'Tencent Cloud',
+        selectedApi,
+        jobId: String(jobId),
+        region: normalizedRegion,
+        requestId: jobResult.requestId,
+        error: jobResult.errorMessage || jobResult.errorCode || 'Tencent Cloud mesh generation failed'
+      });
+    }
+
+    if (jobResult.status === 'RUN' || jobResult.status === 'WAIT') {
+      if (projectId && cardId) {
+        await updateCardProcessingSnapshot(Number(projectId), cardId, {
+          columnName: 'Mesh Gen',
+          name: trimmedName,
+          status: 'processing',
+          progressPercent: null,
+          detail: `Tencent Cloud job status: ${jobResult.status}`,
+          currentNodeLabel: getTencentJobRuntimeLabel(jobResult.status),
+          source: 'Tencent Cloud',
+          operationType: 'mesh-generation',
+          selectedApi,
+          region: normalizedRegion,
+          promptId: String(jobId),
+          jobId: String(jobId),
+          jobStatus: jobResult.status
+        });
+      }
+
+      return res.json({
+        status: 'processing',
+        provider: 'Tencent Cloud',
+        selectedApi,
+        jobId: String(jobId),
+        region: normalizedRegion,
+        requestId: jobResult.requestId,
+        jobStatus: jobResult.status,
+        canFetchResult: true
+      });
+    }
+
+    if (jobResult.status !== 'DONE') {
+      return res.status(500).json({ error: `Unsupported Tencent Cloud job status: ${jobResult.status}` });
+    }
+
+    const downloadedFiles = await downloadTencentCloudResultFiles(jobResult.resultFiles);
+    if (downloadedFiles.length === 0) {
+      throw new Error('Tencent Cloud job finished but no mesh result files were returned');
+    }
+
+    const savedAssets = await saveGeneratedMeshAssets({
+      projectId: Number(projectId),
+      name: trimmedName,
+      cardId,
+      provider: 'Tencent Cloud',
+      prompt: String(prompt || '').trim(),
+      metadata: {
+        region: normalizedRegion,
+        selectedApi,
+        jobId: String(jobId)
+      },
+      downloadedFiles
+    });
+
+    if (cardId) {
+      await clearCardProcessingState(Number(projectId), cardId, {
+        name: trimmedName
+      });
+    }
+
+    return res.json({
+      status: 'completed',
+      provider: 'Tencent Cloud',
+      selectedApi,
+      jobId: String(jobId),
+      region: normalizedRegion,
+      requestId: jobResult.requestId,
+      jobStatus: 'DONE',
+      assets: savedAssets
+    });
+  } catch (err) {
+    console.error('Tencent Cloud mesh generation result query failed:', err);
+    return res.status(500).json({ error: err.message || 'Failed to query Tencent Cloud mesh generation result' });
   }
 });
 

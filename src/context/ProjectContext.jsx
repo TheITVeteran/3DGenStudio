@@ -120,6 +120,22 @@ export function ProjectProvider({ children }) {
     return data
   }
 
+  const queryTencentMeshGenerationResult = async (projectId, queryData) => {
+    const res = await fetch(`${API_BASE}/meshes/generate/tencent/result`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId, ...queryData })
+    })
+
+    const data = await res.json()
+
+    if (!res.ok) {
+      throw new Error(data?.error || 'Failed to query Tencent Cloud mesh generation result')
+    }
+
+    return data
+  }
+
   const deleteAssetEdit = async ({ filePath }) => {
     const params = new URLSearchParams({ filePath })
     const res = await fetch(`${API_BASE}/assets/library/edits?${params.toString()}`, {
@@ -855,6 +871,7 @@ export function ProjectProvider({ children }) {
       deleteCardAttribute,
       runImageEditApi,
       runMeshGenerationApi,
+      queryTencentMeshGenerationResult,
       runMeshEditApi,
       runMeshTexturingApi,
       runImageEditComfy,

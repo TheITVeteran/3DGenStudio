@@ -33,6 +33,12 @@ const IMAGE_COMPARE_NODE_TYPE_NAME = 'Image Compare'
 const IMAGE_COMPARE_INPUT_IDS = ['input-0', 'input-1']
 const LEGACY_INPUT_ID = 'image-input'
 const DEFAULT_CUSTOM_API_TYPE = 'image-generation'
+const TENCENT_MESH_GENERATION_API_ID = 'tencent_meshgeneration'
+const TENCENT_MESH_API_OPTION = { id: TENCENT_MESH_GENERATION_API_ID, name: 'Tencent Cloud · Hunyuan3D Pro' }
+const TENCENT_REGION_OPTIONS = ['ap-singapore', 'eu-frankfurt', 'na-siliconvalley']
+const TENCENT_MODEL_VERSION_OPTIONS = ['3.0', '3.1']
+const TENCENT_GENERATION_TYPE_OPTIONS = ['Normal', 'LowPoly', 'Geometry']
+const TENCENT_POLYGON_TYPE_OPTIONS = ['triangle', 'quadrilaterial']
 const IMAGE_API_LIST = [
   { id: 'nanobana', name: 'Nanobana' },
   { id: 'nanobana_pro', name: 'Nanobana Pro' },
@@ -55,6 +61,18 @@ function normalizeCustomApiType(type) {
   return ['image-generation', 'image-edit', 'mesh-generation', 'mesh-edit', 'mesh-texturing'].includes(type)
     ? type
     : DEFAULT_CUSTOM_API_TYPE
+}
+
+function isTencentMeshGenerationApi(selectedApi = '') {
+  return String(selectedApi || '') === TENCENT_MESH_GENERATION_API_ID
+}
+
+function canFetchTencentMeshResult(metadata = {}, status = null) {
+  return isTencentMeshGenerationApi(metadata?.selectedApi)
+    && status === 'processing'
+    && ['RUN', 'WAIT'].includes(String(metadata?.jobStatus || '').toUpperCase())
+    && metadata?.jobId
+    && metadata?.region
 }
 
 function getNodeKind(nodeTypeName = '') {
@@ -350,6 +368,7 @@ function toBaseFlowNode(node, onDelete) {
       onImageModeSelect: null,
       onImageEditModeSelect: null,
       onMeshGenModeSelect: null,
+      onGetTencentResult: null,
       onDraftFieldChange: null,
       onDraftInputChange: null,
       onRequestLocalFile: null,
@@ -656,6 +675,8 @@ const GraphAssetNode = memo(function GraphAssetNode({ data }) {
   const outputMeta = getConnectorTypeMeta(outputConnector.type)
   const imageInputSources = getCompatibleInputSources(inputSources, 'image')
   const selectedApiImageSource = resolveImageSourceOption(draft?.selectedInputSource, inputSources, data.libraryImageOptions)
+  const isTencentMeshApi = isMeshGen && isTencentMeshGenerationApi(draft?.selectedApi)
+  const canFetchTencentResult = isMeshGen && canFetchTencentMeshResult(data.metadata, data.status)
   const nodeDisplayName = data.name || data.asset?.name || sourceLabel
   const meshEditorPath = isMeshGen && data.asset?.id
     ? buildMeshEditorPath({
@@ -986,6 +1007,12 @@ const GraphAssetNode = memo(function GraphAssetNode({ data }) {
                 <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>play_arrow</span>
                 Action
               </button>
+              {canFetchTencentResult && (
+                <button className="image-card__edit-action-btn nodrag" onClick={() => data.onGetTencentResult?.(data.id)}>
+                  <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>refresh</span>
+                  GET RESULT
+                </button>
+              )}
               {meshEditorPath && (
                 <button className="image-card__edit-action-btn nodrag" onClick={() => navigate(meshEditorPath)}>
                   <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>edit_square</span>
@@ -1183,6 +1210,9 @@ const GraphAssetNode = memo(function GraphAssetNode({ data }) {
                     value={draft.selectedInputSource || ''}
                     onChange={event => data.onDraftFieldChange?.(data.id, 'selectedInputSource', event.target.value)}
                   >
+                    {isTencentMeshApi && (
+                      <option value="">No image source (use prompt)</option>
+                    )}
                     {imageInputSources.length > 0 && (
                       <optgroup label="Connected inputs">
                         {imageInputSources.map(source => (
@@ -1192,7 +1222,7 @@ const GraphAssetNode = memo(function GraphAssetNode({ data }) {
                         ))}
                       </optgroup>
                     )}
-                    {data.libraryImageOptions.length > 0 && (
+                    {!isTencentMeshApi && data.libraryImageOptions.length > 0 && (
                       <optgroup label="Asset library">
                         {data.libraryImageOptions.map(asset => (
                           <option key={asset.id} value={asset.sourceReference || asset.id}>
@@ -1201,16 +1231,84 @@ const GraphAssetNode = memo(function GraphAssetNode({ data }) {
                         ))}
                       </optgroup>
                     )}
-                    {imageInputSources.length === 0 && data.libraryImageOptions.length === 0 && (
+                    {imageInputSources.length === 0 && (isTencentMeshApi || data.libraryImageOptions.length === 0) && (
                       <option value="">No image sources available</option>
                     )}
                   </select>
+                  {isTencentMeshApi && (
+                    <>
+                      <select
+                        className="params-card__select nodrag"
+                        value={draft.region || 'eu-frankfurt'}
+                        onChange={event => data.onDraftFieldChange?.(data.id, 'region', event.target.value)}
+                      >
+                        {TENCENT_REGION_OPTIONS.map(option => (
+                          <option key={option} value={option}>{option}</option>
+                        ))}
+                      </select>
+                      <select
+                        className="params-card__select nodrag"
+                        value={draft.modelVersion || '3.0'}
+                        onChange={event => data.onDraftFieldChange?.(data.id, 'modelVersion', event.target.value)}
+                      >
+                        {TENCENT_MODEL_VERSION_OPTIONS.map(option => (
+                          <option key={option} value={option}>{option}</option>
+                        ))}
+                      </select>
+                      <select
+                        className="params-card__select nodrag"
+                        value={draft.generationType || 'Normal'}
+                        onChange={event => data.onDraftFieldChange?.(data.id, 'generationType', event.target.value)}
+                      >
+                        {TENCENT_GENERATION_TYPE_OPTIONS.map(option => (
+                          <option key={option} value={option}>{option}</option>
+                        ))}
+                      </select>
+                      {draft.generationType === 'LowPoly' && (
+                        <select
+                          className="params-card__select nodrag"
+                          value={draft.polygonType || 'triangle'}
+                          onChange={event => data.onDraftFieldChange?.(data.id, 'polygonType', event.target.value)}
+                        >
+                          {TENCENT_POLYGON_TYPE_OPTIONS.map(option => (
+                            <option key={option} value={option}>{option}</option>
+                          ))}
+                        </select>
+                      )}
+                      <input
+                        type="number"
+                        min="3000"
+                        max="1500000"
+                        className="params-card__input nodrag"
+                        placeholder="Face count"
+                        value={draft.faceCount ?? 500000}
+                        onChange={event => data.onDraftFieldChange?.(data.id, 'faceCount', event.target.value)}
+                      />
+                      <label className="params-card__checkbox-label nodrag">
+                        <div
+                          className={`params-card__checkbox ${draft.enablePBR ? 'params-card__checkbox--checked' : 'params-card__checkbox--unchecked'}`}
+                          onClick={() => data.onDraftFieldChange?.(data.id, 'enablePBR', !draft.enablePBR)}
+                        >
+                          {draft.enablePBR && <span className="material-symbols-outlined" style={{ fontSize: '10px', color: 'var(--on-tertiary)', fontWeight: 700 }}>check</span>}
+                        </div>
+                        <span>Enable PBR</span>
+                      </label>
+                    </>
+                  )}
                   <div className="graph-node__linked-input font-label">
                     {selectedApiImageSource?.label
                       ? `Input: ${selectedApiImageSource.label}`
-                      : 'Select an image source from the graph or asset library'}
+                      : isTencentMeshApi
+                        ? 'Select a connected image input or leave empty to use prompt only'
+                        : 'Select an image source from the graph or asset library'}
                   </div>
-                  <button className="gen-btn nodrag" onClick={() => data.onRunNodeAction?.(data.id)} disabled={!draft.selectedInputSource}>
+                  <button
+                    className="gen-btn nodrag"
+                    onClick={() => data.onRunNodeAction?.(data.id)}
+                    disabled={isTencentMeshApi
+                      ? (!draft.name?.trim() || (!draft.prompt?.trim() && !draft.selectedInputSource) || (draft.prompt?.trim() && draft.selectedInputSource))
+                      : !draft.selectedInputSource}
+                  >
                     <span className="material-symbols-outlined">deployed_code</span>
                     RUN GENERATION
                   </button>
@@ -1759,7 +1857,8 @@ export default function GraphPage({ project }) {
     subscribeToComfyWorkflowProgress,
     runImageEditApi,
     runImageEditComfy,
-    runMeshGenerationApi
+    runMeshGenerationApi,
+    queryTencentMeshGenerationResult
   } = useProjects()
   const { settings } = useSettings()
 
@@ -1803,9 +1902,12 @@ export default function GraphPage({ project }) {
   ]), [customApis])
 
   const meshGenerationApis = useMemo(() => (
-    customApis
-      .filter(api => normalizeCustomApiType(api?.type) === 'mesh-generation')
-      .map(api => ({ id: `custom_${api.id}`, name: api.name }))
+    [
+      TENCENT_MESH_API_OPTION,
+      ...customApis
+        .filter(api => normalizeCustomApiType(api?.type) === 'mesh-generation')
+        .map(api => ({ id: `custom_${api.id}`, name: api.name }))
+    ]
   ), [customApis])
 
   const imageGenerationWorkflows = useMemo(() => filterImageGenerationWorkflows(comfyWorkflows), [comfyWorkflows])
@@ -1933,7 +2035,7 @@ export default function GraphPage({ project }) {
       selectedApi: meshGenerationApis[0]?.id || '',
       prompt: '',
       selectedInputSource: mode === 'api'
-        ? (getInputSourceSelectionValue(defaultImageInputSource) || libraryOptions[0]?.sourceReference || sourceReference || '')
+        ? (getInputSourceSelectionValue(defaultImageInputSource) || sourceReference || '')
         : '',
       workflowId: defaultWorkflow?.id || '',
       inputs: mode === 'comfy'
@@ -1943,7 +2045,13 @@ export default function GraphPage({ project }) {
         : {},
       inputBindings: mode === 'comfy'
         ? createWorkflowDraftBindings(defaultWorkflow, inputSources, ['image'])
-        : {}
+        : {},
+      region: 'eu-frankfurt',
+      modelVersion: '3.0',
+      enablePBR: false,
+      faceCount: 500000,
+      generationType: 'Normal',
+      polygonType: 'triangle'
     }
   }, [meshGenerationApis, meshGenerationWorkflows])
 
@@ -2319,7 +2427,11 @@ export default function GraphPage({ project }) {
 		}
 	}, [attachExistingAsset, assetSelectorType, pendingAssetNodeId, project.id, updateProjectNode, replaceFlowNodeData, setActionDraftsByNodeId]);
 
-  const renderedNodes = useMemo(() => nodes.map(node => ({
+  const renderedNodes = useMemo(() => nodes.map(node => {
+    const nodeInputConnectors = buildInputConnectors(node.id, nodes, edges)
+    const nodeInputSources = buildNodeInputSources(node.id, nodes, edges)
+
+    return ({
     ...node,
     dragHandle: isValueNodeKind(node.data.nodeKind)
       ? '.graph-node__value-card'
@@ -2328,8 +2440,8 @@ export default function GraphPage({ project }) {
         : '.graph-node__card',
     data: {
       ...node.data,
-      inputConnectors: buildInputConnectors(node.id, nodes, edges),
-      inputSources: buildNodeInputSources(node.id, nodes, edges),
+      inputConnectors: nodeInputConnectors,
+      inputSources: nodeInputSources,
       outputConnector: {
         id: DEFAULT_OUTPUT_ID,
         type: getNodeOutputType(node)
@@ -2483,6 +2595,23 @@ export default function GraphPage({ project }) {
               inputBindings: (isEditNode || isMeshGenNode)
                 ? createWorkflowDraftBindings(selectedWorkflow, targetInputSources, ['image'])
                 : createWorkflowDraftBindings(selectedWorkflow, targetInputSources)
+            }
+          }
+
+          if (field === 'selectedApi' && node.data.nodeKind === 'meshGen') {
+            const defaultImageInputSource = getCompatibleInputSources(targetInputSources, 'image')[0] || null
+            nextDraft = {
+              ...nextDraft,
+              selectedInputSource: isTencentMeshGenerationApi(value)
+                ? (getInputSourceSelectionValue(defaultImageInputSource) || '')
+                : (nextDraft.selectedInputSource || getInputSourceSelectionValue(defaultImageInputSource) || libraryImageOptions[0]?.sourceReference || '')
+            }
+          }
+
+          if (field === 'generationType' && value !== 'LowPoly') {
+            nextDraft = {
+              ...nextDraft,
+              polygonType: 'triangle'
             }
           }
 
@@ -2904,12 +3033,102 @@ export default function GraphPage({ project }) {
             const selectedApiSource = resolveImageSourceOption(targetDraft.selectedInputSource, targetInputSources, libraryImageOptions)
             const sourceAsset = selectedApiSource?.asset || getConnectedInputAssetFrom(nodes, edges, targetNodeId)
             const sourceReference = selectedApiSource?.sourceReference || getAssetSourceReference(sourceAsset)
+            const isTencentMeshApi = isTencentMeshGenerationApi(targetDraft.selectedApi)
+            const trimmedPrompt = String(targetDraft.prompt || '').trim()
 
-            if (!sourceReference) {
+            if (!isTencentMeshApi && !sourceReference) {
               return
             }
 
-            if (!targetDraft.selectedApi || !String(targetDraft.prompt || '').trim() || !String(targetDraft.name || '').trim()) {
+            if (!targetDraft.selectedApi || !String(targetDraft.name || '').trim()) {
+              return
+            }
+
+            if (isTencentMeshApi) {
+              if (Boolean(trimmedPrompt) === Boolean(sourceReference)) {
+                await setProcessingState('error', null, {
+                  processingSource: 'Tencent Cloud',
+                  selectedApi: targetDraft.selectedApi,
+                  error: 'Provide either a prompt or an image input for Tencent Cloud mesh generation',
+                  detail: 'Use either prompt-only or image-only input for Tencent Cloud',
+                  currentNodeLabel: 'Tencent Cloud input validation failed'
+                }, {
+                  progressDetail: 'Use either prompt-only or image-only input for Tencent Cloud',
+                  currentNodeLabel: 'Tencent Cloud input validation failed'
+                })
+                return
+              }
+
+              await setProcessingState('processing', null, {
+                processingSource: 'Tencent Cloud',
+                selectedApi: targetDraft.selectedApi,
+                inputSource: sourceReference || null,
+                region: targetDraft.region,
+                modelVersion: targetDraft.modelVersion,
+                generationType: targetDraft.generationType,
+                polygonType: targetDraft.generationType === 'LowPoly' ? targetDraft.polygonType : null,
+                enablePBR: Boolean(targetDraft.enablePBR),
+                faceCount: Number(targetDraft.faceCount) || 500000,
+                prompt: trimmedPrompt,
+                jobStatus: 'WAIT',
+                detail: 'Submitting Tencent Cloud mesh generation job',
+                currentNodeLabel: 'Waiting for Tencent Cloud job id'
+              }, {
+                progressDetail: 'Submitting Tencent Cloud mesh generation job',
+                currentNodeLabel: 'Waiting for Tencent Cloud job id'
+              })
+
+              try {
+                const response = await runMeshGenerationApi(project.id, {
+                  imageSource: sourceReference || null,
+                  name: targetDraft.name.trim(),
+                  selectedApi: targetDraft.selectedApi,
+                  prompt: trimmedPrompt,
+                  region: targetDraft.region,
+                  modelVersion: targetDraft.modelVersion,
+                  enablePBR: Boolean(targetDraft.enablePBR),
+                  faceCount: Number(targetDraft.faceCount) || 500000,
+                  generationType: targetDraft.generationType,
+                  polygonType: targetDraft.generationType === 'LowPoly' ? targetDraft.polygonType : undefined
+                })
+
+                await setProcessingState('processing', null, {
+                  processingSource: 'Tencent Cloud',
+                  selectedApi: response.selectedApi || targetDraft.selectedApi,
+                  inputSource: sourceReference || null,
+                  region: response.region || targetDraft.region,
+                  modelVersion: targetDraft.modelVersion,
+                  generationType: targetDraft.generationType,
+                  polygonType: targetDraft.generationType === 'LowPoly' ? targetDraft.polygonType : null,
+                  enablePBR: Boolean(targetDraft.enablePBR),
+                  faceCount: Number(targetDraft.faceCount) || 500000,
+                  prompt: trimmedPrompt,
+                  jobId: response.jobId,
+                  promptId: response.jobId,
+                  jobStatus: 'WAIT',
+                  detail: 'Tencent Cloud job submitted. Use GET RESULT to refresh status.',
+                  currentNodeLabel: 'Tencent Cloud job is queued'
+                }, {
+                  progressDetail: 'Tencent Cloud job submitted. Use GET RESULT to refresh status.',
+                  currentNodeLabel: 'Tencent Cloud job is queued'
+                })
+                setActionDraftsByNodeId({})
+              } catch (err) {
+                await setProcessingState('error', null, {
+                  processingSource: 'Tencent Cloud',
+                  selectedApi: targetDraft.selectedApi,
+                  inputSource: sourceReference || null,
+                  region: targetDraft.region,
+                  prompt: trimmedPrompt,
+                  error: err.message || 'Tencent Cloud mesh generation failed',
+                  detail: err.message || 'Tencent Cloud mesh generation failed',
+                  currentNodeLabel: 'Tencent Cloud job submission failed',
+                  jobStatus: 'FAIL'
+                }, {
+                  progressDetail: err.message || 'Tencent Cloud mesh generation failed',
+                  currentNodeLabel: 'Tencent Cloud job submission failed'
+                })
+              }
               return
             }
 
@@ -3184,9 +3403,147 @@ export default function GraphPage({ project }) {
           }
         }
       },
+      onGetTencentResult: async (targetNodeId) => {
+        const targetNode = nodes.find(item => item.id === String(targetNodeId))
+        const runtimeMetadata = targetNode?.data?.metadata || {}
+
+        if (!targetNode || !canFetchTencentMeshResult(runtimeMetadata, targetNode.data.status)) {
+          return
+        }
+
+        const setProcessingState = async (status, progress = null, metadata = {}, transientData = {}) => {
+          const updatedNode = await updateProjectNode(project.id, Number(targetNodeId), {
+            status,
+            progress,
+            metadata
+          })
+          replaceFlowNodeData(updatedNode)
+          setNodeTransientData(targetNodeId, {
+            progressDetail: transientData.progressDetail ?? null,
+            currentNodeLabel: transientData.currentNodeLabel ?? null
+          })
+        }
+
+        const applyNodeResult = async (asset, metadata = {}) => {
+          const updatedNode = await updateProjectNode(project.id, Number(targetNodeId), {
+            assetId: asset.id,
+            name: asset.name,
+            status: null,
+            progress: null,
+            metadata
+          })
+          replaceFlowNodeData(updatedNode)
+          setNodeTransientData(targetNodeId, {
+            progressDetail: null,
+            currentNodeLabel: null
+          })
+        }
+
+        const spawnAdditionalResultNodes = async (nodeTypeName, assets) => {
+          const baseX = targetNode.position.x
+          const baseY = targetNode.position.y
+          for (let index = 0; index < assets.length; index += 1) {
+            const asset = assets[index]
+            await handleCreateNode(nodeTypeName, {
+              name: asset.name || nodeTypeName,
+              assetId: asset.id,
+              xPos: baseX + 360,
+              yPos: baseY + ((index + 1) * 140),
+              metadata: {
+                createdFromNodeId: Number(targetNodeId)
+              }
+            })
+          }
+        }
+
+        await setProcessingState('processing', null, {
+          ...runtimeMetadata,
+          detail: 'Checking Tencent Cloud job result…',
+          currentNodeLabel: `Job ${runtimeMetadata.jobId}`
+        }, {
+          progressDetail: 'Checking Tencent Cloud job result…',
+          currentNodeLabel: `Job ${runtimeMetadata.jobId}`
+        })
+
+        try {
+          const response = await queryTencentMeshGenerationResult(project.id, {
+            jobId: runtimeMetadata.jobId,
+            region: runtimeMetadata.region,
+            name: targetNode.data.name || targetNode.data.asset?.name || 'Generated Mesh',
+            prompt: runtimeMetadata.prompt || '',
+            selectedApi: runtimeMetadata.selectedApi || TENCENT_MESH_GENERATION_API_ID
+          })
+
+          if (response.status === 'processing') {
+            await setProcessingState('processing', null, {
+              ...runtimeMetadata,
+              selectedApi: response.selectedApi || runtimeMetadata.selectedApi,
+              region: response.region || runtimeMetadata.region,
+              jobId: response.jobId || runtimeMetadata.jobId,
+              promptId: response.jobId || runtimeMetadata.promptId,
+              jobStatus: response.jobStatus || runtimeMetadata.jobStatus,
+              detail: `Tencent Cloud job status: ${response.jobStatus}`,
+              currentNodeLabel: response.jobStatus === 'RUN' ? 'Tencent Cloud job is running' : 'Tencent Cloud job is queued'
+            }, {
+              progressDetail: `Tencent Cloud job status: ${response.jobStatus}`,
+              currentNodeLabel: response.jobStatus === 'RUN' ? 'Tencent Cloud job is running' : 'Tencent Cloud job is queued'
+            })
+            return
+          }
+
+          if (response.status === 'error') {
+            await setProcessingState('error', null, {
+              ...runtimeMetadata,
+              jobStatus: 'FAIL',
+              detail: response.error || 'Tencent Cloud mesh generation failed',
+              currentNodeLabel: 'Tencent Cloud job failed',
+              error: response.error || 'Tencent Cloud mesh generation failed'
+            }, {
+              progressDetail: response.error || 'Tencent Cloud mesh generation failed',
+              currentNodeLabel: 'Tencent Cloud job failed'
+            })
+            return
+          }
+
+          const savedMeshes = (response.assets || []).filter(asset => asset?.type === 'mesh')
+          if (savedMeshes.length === 0) {
+            throw new Error('Tencent Cloud job finished but no saved mesh was returned')
+          }
+
+          await ensureGeneratedMeshThumbnails(savedMeshes)
+          await applyNodeResult(savedMeshes[0], {
+            lastAction: 'mesh-generation-tencent',
+            inputSource: runtimeMetadata.inputSource || null,
+            processingSource: null,
+            selectedApi: null,
+            region: null,
+            jobId: null,
+            promptId: null,
+            jobStatus: null,
+            detail: null,
+            currentNodeLabel: null,
+            error: null
+          })
+          if (savedMeshes.length > 1) {
+            await spawnAdditionalResultNodes('Mesh Gen', savedMeshes.slice(1))
+          }
+          setActionDraftsByNodeId({})
+        } catch (err) {
+          await setProcessingState('error', null, {
+            ...runtimeMetadata,
+            jobStatus: 'FAIL',
+            detail: err.message || 'Failed to fetch Tencent Cloud mesh result',
+            currentNodeLabel: 'Tencent Cloud result query failed',
+            error: err.message || 'Failed to fetch Tencent Cloud mesh result'
+          }, {
+            progressDetail: err.message || 'Failed to fetch Tencent Cloud mesh result',
+            currentNodeLabel: 'Tencent Cloud result query failed'
+          })
+        }
+      },
       onCloseAction: () => setActionDraftsByNodeId({})
     }
-  })), [actionDraftsByNodeId, attachExistingAsset, closeNodeProgressSubscription, comfyLoading, createImageEditNodeDraft, createImageNodeDraft, createMeshGenNodeDraft, createProjectConnection, edges, ensureComfyWorkflowsLoaded, ensureGeneratedMeshThumbnails, ensureLibraryLoaded, generateImage, getConnectedInputAssetFrom, handleCreateNode, handleNodeNameChange, handleNodeNameCommit, handleNodeOutputValueChange, handleNodeOutputValueCommit, imageEditApis, imageEditWorkflows, imageGenerationApis, imageGenerationWorkflows, libraryImageOptions, libraryLoading, meshGenerationApis, meshGenerationWorkflows, nodes, openActionDraft, project.id, replaceFlowNodeData, runComfyWorkflow, runImageEditApi, runImageEditComfy, runMeshGenerationApi, setEdges, setNodeTransientData, setNodes, subscribeToComfyWorkflowProgress, updateProjectNode])
+  })}), [actionDraftsByNodeId, attachExistingAsset, closeNodeProgressSubscription, comfyLoading, createImageEditNodeDraft, createImageNodeDraft, createMeshGenNodeDraft, createProjectConnection, edges, ensureComfyWorkflowsLoaded, ensureGeneratedMeshThumbnails, ensureLibraryLoaded, generateImage, getConnectedInputAssetFrom, handleCreateNode, handleNodeNameChange, handleNodeNameCommit, handleNodeOutputValueChange, handleNodeOutputValueCommit, imageEditApis, imageEditWorkflows, imageGenerationApis, imageGenerationWorkflows, libraryImageOptions, libraryLoading, meshGenerationApis, meshGenerationWorkflows, nodes, openActionDraft, project.id, queryTencentMeshGenerationResult, replaceFlowNodeData, runComfyWorkflow, runImageEditApi, runImageEditComfy, runMeshGenerationApi, setEdges, setNodeTransientData, setNodes, subscribeToComfyWorkflowProgress, updateProjectNode])
 
   const handleFileUpload = useCallback(async (event) => {
     const file = event.target.files?.[0]
@@ -3347,10 +3704,12 @@ export default function GraphPage({ project }) {
         let nextDraft = draft
 
         if (draft.mode === 'api' && (isEditNode || isMeshGenNode)) {
-          const validImageSelections = [
-            ...getCompatibleInputSources(nodeInputSources, 'image').map(getInputSourceSelectionValue),
-            ...libraryImageOptions.map(option => option.sourceReference).filter(Boolean)
-          ]
+          const validImageSelections = isMeshGenNode && isTencentMeshGenerationApi(draft.selectedApi)
+            ? getCompatibleInputSources(nodeInputSources, 'image').map(getInputSourceSelectionValue)
+            : [
+                ...getCompatibleInputSources(nodeInputSources, 'image').map(getInputSourceSelectionValue),
+                ...libraryImageOptions.map(option => option.sourceReference).filter(Boolean)
+              ]
 
           const nextSelectedInputSource = validImageSelections.includes(draft.selectedInputSource)
             ? draft.selectedInputSource

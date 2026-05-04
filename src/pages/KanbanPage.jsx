@@ -18,6 +18,12 @@ const IMAGE_API_LIST = [
   { id: 'openai_gpt_image_1', name: 'OpenAI · gpt-image-1' },
   { id: 'openai_gpt_image_1_5', name: 'OpenAI · gpt-image-1.5' },
 ]
+const TENCENT_MESH_GENERATION_API_ID = 'tencent_meshgeneration'
+const TENCENT_MESH_API_OPTION = { id: TENCENT_MESH_GENERATION_API_ID, name: 'Tencent Cloud · Hunyuan3D Pro' }
+const TENCENT_REGION_OPTIONS = ['ap-singapore', 'eu-frankfurt', 'na-siliconvalley']
+const TENCENT_MODEL_VERSION_OPTIONS = ['3.0', '3.1']
+const TENCENT_GENERATION_TYPE_OPTIONS = ['Normal', 'LowPoly', 'Geometry']
+const TENCENT_POLYGON_TYPE_OPTIONS = ['triangle', 'quadrilaterial']
 
 const IMAGE_CARD_COLUMNS = [
   { id: 'images', dbId: 1, icon: 'image', title: 'IMAGES' },
@@ -50,6 +56,18 @@ function normalizeCustomApiType(type) {
   return ['image-generation', 'image-edit', 'mesh-generation', 'mesh-edit', 'mesh-texturing'].includes(type)
     ? type
     : DEFAULT_CUSTOM_API_TYPE
+}
+
+function isTencentMeshGenerationApi(selectedApi = '') {
+  return String(selectedApi || '') === TENCENT_MESH_GENERATION_API_ID
+}
+
+function canFetchTencentMeshResult(runtimeState) {
+  return runtimeState?.source === 'Tencent Cloud'
+    && runtimeState?.status === 'processing'
+    && ['RUN', 'WAIT'].includes(String(runtimeState?.jobStatus || '').toUpperCase())
+    && runtimeState?.jobId
+    && runtimeState?.region
 }
 
 function getComfyDraftFromWorkflow(workflow) {
@@ -116,6 +134,7 @@ export default function KanbanPage() {
     deleteCardAttribute,
     runImageEditApi,
     runMeshGenerationApi,
+    queryTencentMeshGenerationResult,
     runMeshEditApi,
     runMeshTexturingApi,
     runImageEditComfy,
@@ -890,9 +909,12 @@ export default function KanbanPage() {
   ]), [customApis])
 
   const meshGenerationApis = useMemo(() => (
-    customApis
-      .filter(api => normalizeCustomApiType(api?.type) === 'mesh-generation')
-      .map(api => ({ id: `custom_${api.id}`, name: api.name }))
+    [
+      TENCENT_MESH_API_OPTION,
+      ...customApis
+        .filter(api => normalizeCustomApiType(api?.type) === 'mesh-generation')
+        .map(api => ({ id: `custom_${api.id}`, name: api.name }))
+    ]
   ), [customApis])
 
   const meshEditApis = useMemo(() => (
@@ -1252,7 +1274,11 @@ export default function KanbanPage() {
   const createImageEditDraft = (card, mode) => {
     const promptOptions = getPromptOptionsForCard(card.id)
     const firstPromptOption = promptOptions[0] || { id: 'custom', value: '' }
-    const isCustomPrompt = firstPromptOption.id === 'custom'
+    const defaultSelectedApi = getDefaultApiForCard(card)
+    const defaultPromptOption = card.kanbanColumnId === 3 && isTencentMeshGenerationApi(defaultSelectedApi)
+      ? { id: 'none', value: '' }
+      : firstPromptOption
+    const isCustomPrompt = defaultPromptOption.id === 'custom'
     const availableWorkflows = getWorkflowsForCard(card)
     const initialWorkflow = mode === 'comfy' ? (availableWorkflows[0] || null) : null
 
@@ -1260,15 +1286,21 @@ export default function KanbanPage() {
       cardId: card.id,
       mode,
       name: '',
-      selectedApi: getDefaultApiForCard(card),
+      selectedApi: defaultSelectedApi,
       selectedAssetId: [4, 5].includes(card.kanbanColumnId)
         ? (card.meshAssets[0]?.id ? `asset:${card.meshAssets[0].id}` : '')
         : (card.assets[0]?.id ? `asset:${card.assets[0].id}` : ''),
       workflowId: initialWorkflow?.id || '',
       inputBindings: createImageEditInputBindings(card, initialWorkflow),
-      promptSource: firstPromptOption.id,
-      customPrompt: isCustomPrompt ? '' : firstPromptOption.value,
-      promptValue: isCustomPrompt ? '' : firstPromptOption.value
+      promptSource: defaultPromptOption.id,
+      customPrompt: isCustomPrompt ? '' : defaultPromptOption.value,
+      promptValue: isCustomPrompt ? '' : defaultPromptOption.value,
+      region: 'eu-frankfurt',
+      modelVersion: '3.0',
+      enablePBR: false,
+      faceCount: 500000,
+      generationType: 'Normal',
+      polygonType: 'triangle'
     }
   }
 
@@ -1311,7 +1343,9 @@ export default function KanbanPage() {
       }
 
       if (field === 'promptSource') {
-        const promptOption = getPromptOptionsForCard(card.id).find(option => option.id === value)
+        const promptOption = value === 'none'
+          ? { id: 'none', value: '' }
+          : getPromptOptionsForCard(card.id).find(option => option.id === value)
         nextDraft.promptValue = promptOption?.id === 'custom' ? (prev.customPrompt || '') : (promptOption?.value || '')
       }
 
@@ -1328,6 +1362,23 @@ export default function KanbanPage() {
       if (field === 'workflowId' && nextDraft.mode === 'comfy') {
         const workflow = getWorkflowsForCard(card).find(item => item.id == value)
         nextDraft.inputBindings = createImageEditInputBindings(card, workflow)
+      }
+
+      if (field === 'selectedApi' && card.kanbanColumnId === 3) {
+        if (isTencentMeshGenerationApi(value) && !nextDraft.promptSource) {
+          nextDraft.promptSource = 'none'
+          nextDraft.promptValue = ''
+        }
+
+        if (!isTencentMeshGenerationApi(value) && nextDraft.promptSource === 'none') {
+          const promptOption = getPromptOptionsForCard(card.id)[0] || { id: 'custom', value: '' }
+          nextDraft.promptSource = promptOption.id
+          nextDraft.promptValue = promptOption.id === 'custom' ? (nextDraft.customPrompt || '') : (promptOption.value || '')
+        }
+      }
+
+      if (field === 'generationType' && value !== 'LowPoly') {
+        nextDraft.polygonType = 'triangle'
       }
 
       return nextDraft
@@ -1384,12 +1435,107 @@ export default function KanbanPage() {
   }
 
   const resolveDraftPrompt = (card, draft) => {
+    if (draft.promptSource === 'none') {
+      return ''
+    }
+
     const promptOption = getPromptOptionsForCard(card.id).find(option => option.id === draft.promptSource)
     if (promptOption?.id === 'custom') {
       return draft.customPrompt?.trim() || ''
     }
 
     return promptOption?.value?.trim() || ''
+  }
+
+  const handleGetTencentMeshResult = async (card) => {
+    const runtimeState = getCardRuntimeState(card)
+    if (!canFetchTencentMeshResult(runtimeState)) {
+      return
+    }
+
+    const existingMeshAssetIds = (card.meshAssets || []).map(asset => asset.id)
+
+    try {
+      setImageEditPendingCardId(card.id)
+      setImageEditProgressByCardId(prev => ({
+        ...prev,
+        [card.id]: {
+          ...runtimeState,
+          detail: 'Checking Tencent Cloud job result…',
+          currentNodeLabel: `Job ${runtimeState.jobId}`
+        }
+      }))
+
+      const response = await queryTencentMeshGenerationResult(projectId, {
+        jobId: runtimeState.jobId,
+        region: runtimeState.region,
+        name: runtimeState.name || card.primaryDisplayAsset?.name || 'Generated Mesh',
+        prompt: runtimeState.prompt || '',
+        cardId: card.id,
+        selectedApi: runtimeState.selectedApi || TENCENT_MESH_GENERATION_API_ID
+      })
+
+      if (response.status === 'processing') {
+        setImageEditProgressByCardId(prev => ({
+          ...prev,
+          [card.id]: {
+            ...runtimeState,
+            status: 'processing',
+            source: response.provider || 'Tencent Cloud',
+            detail: `Tencent Cloud job status: ${response.jobStatus}`,
+            currentNodeLabel: response.jobStatus === 'RUN' ? 'Tencent Cloud job is running' : 'Tencent Cloud job is queued',
+            jobStatus: response.jobStatus || runtimeState.jobStatus,
+            jobId: response.jobId || runtimeState.jobId,
+            promptId: response.jobId || runtimeState.promptId,
+            region: response.region || runtimeState.region,
+            selectedApi: response.selectedApi || runtimeState.selectedApi,
+            name: runtimeState.name || card.primaryDisplayAsset?.name || 'Generated Mesh'
+          }
+        }))
+        showStatusMessage('Tencent Cloud mesh job is still running.', 'info')
+        return
+      }
+
+      if (response.status === 'error') {
+        setImageEditProgressByCardId(prev => ({
+          ...prev,
+          [card.id]: {
+            ...runtimeState,
+            status: 'error',
+            detail: response.error || 'Tencent Cloud mesh generation failed',
+            currentNodeLabel: 'Tencent Cloud job failed',
+            jobStatus: 'FAIL'
+          }
+        }))
+        await refreshProjectAssets().catch(() => {})
+        showStatusMessage(response.error || 'Tencent Cloud mesh generation failed', 'error')
+        return
+      }
+
+      const savedMeshes = (response.assets || []).filter(asset => asset?.type === 'mesh')
+      if (savedMeshes.length === 0) {
+        throw new Error('Tencent Cloud job finished but no saved mesh was returned')
+      }
+
+      await ensureGeneratedMeshThumbnails(savedMeshes)
+      queueResultFocus({
+        type: 'mesh-result',
+        cardId: card.id,
+        existingMeshAssetIds
+      })
+      await refreshProjectAssets()
+      setImageEditProgressByCardId(prev => {
+        const nextState = { ...prev }
+        delete nextState[card.id]
+        return nextState
+      })
+      showStatusMessage('Tencent Cloud mesh generation completed successfully.', 'success')
+    } catch (err) {
+      console.error('Failed to fetch Tencent Cloud mesh result:', err)
+      showStatusMessage(err.message || 'Failed to fetch Tencent Cloud mesh result', 'error')
+    } finally {
+      setImageEditPendingCardId(null)
+    }
   }
 
   const handleRunImageEdit = async (card) => {
@@ -1412,18 +1558,78 @@ export default function KanbanPage() {
     const selectedSourceAssetId = selectedImageSourceGroup?.asset?.id || null
     const existingSourceChildCount = selectedImageSourceGroup ? getAssetChildren(selectedImageSourceGroup.asset).length : 0
 
+    let keepRuntimeState = false
+
     try {
       setImageEditPendingCardId(card.id)
 
       if (imageEditDraft.mode === 'api') {
         const prompt = resolveDraftPrompt(card, imageEditDraft)
+        const isTencentMeshApi = isMeshGenCard && isTencentMeshGenerationApi(imageEditDraft.selectedApi)
 
-        if (!imageEditDraft.selectedAssetId || !prompt || !name) {
+        if (!isTencentMeshApi && (!imageEditDraft.selectedAssetId || !prompt || !name)) {
           showStatusMessage(`Select a ${sourceAssetLabel}, add a name, and provide a prompt.`, 'error')
           return
         }
 
         if (isMeshGenCard) {
+          if (isTencentMeshApi) {
+            const hasPrompt = Boolean(prompt)
+            const hasImageSource = Boolean(imageEditDraft.selectedAssetId)
+
+            if (!name) {
+              showStatusMessage('Add a name for the generated mesh.', 'error')
+              return
+            }
+
+            if (hasPrompt === hasImageSource) {
+              showStatusMessage('Provide either a prompt or an image source for Tencent Cloud mesh generation.', 'error')
+              return
+            }
+
+            const queuedJob = await runMeshGenerationApi(projectId, {
+              imageSource: hasImageSource ? imageEditDraft.selectedAssetId : null,
+              name,
+              selectedApi: imageEditDraft.selectedApi,
+              prompt,
+              cardId: card.id,
+              region: imageEditDraft.region,
+              modelVersion: imageEditDraft.modelVersion,
+              enablePBR: imageEditDraft.enablePBR,
+              faceCount: Number(imageEditDraft.faceCount) || 500000,
+              generationType: imageEditDraft.generationType,
+              polygonType: imageEditDraft.generationType === 'LowPoly' ? imageEditDraft.polygonType : undefined
+            })
+
+            keepRuntimeState = true
+            setImageEditProgressByCardId(prev => ({
+              ...prev,
+              [card.id]: {
+                status: 'processing',
+                source: queuedJob.provider || 'Tencent Cloud',
+                detail: 'Tencent Cloud job submitted. Use GET RESULT to refresh status.',
+                currentNodeLabel: 'Tencent Cloud job is queued',
+                jobStatus: 'WAIT',
+                jobId: queuedJob.jobId,
+                promptId: queuedJob.jobId,
+                region: queuedJob.region || imageEditDraft.region,
+                selectedApi: queuedJob.selectedApi || imageEditDraft.selectedApi,
+                name,
+                prompt,
+                modelVersion: imageEditDraft.modelVersion,
+                generationType: imageEditDraft.generationType,
+                polygonType: imageEditDraft.polygonType,
+                enablePBR: imageEditDraft.enablePBR,
+                faceCount: Number(imageEditDraft.faceCount) || 500000
+              }
+            }))
+
+            await refreshProjectAssets()
+            setImageEditDraft(null)
+            showStatusMessage('Tencent Cloud mesh job submitted.', 'info')
+            return
+          }
+
           const generatedMesh = await runMeshGenerationApi(projectId, {
             imageSource: imageEditDraft.selectedAssetId,
             name,
@@ -1675,16 +1881,18 @@ export default function KanbanPage() {
             ? 'Failed to run mesh texturing'
           : 'Failed to run image edit'), 'error')
     } finally {
-      closeImageEditProgressSubscription(card.id)
-      setImageEditProgressByCardId(prev => {
-        if (!(card.id in prev)) {
-          return prev
-        }
+      if (!keepRuntimeState) {
+        closeImageEditProgressSubscription(card.id)
+        setImageEditProgressByCardId(prev => {
+          if (!(card.id in prev)) {
+            return prev
+          }
 
-        const nextState = { ...prev }
-        delete nextState[card.id]
-        return nextState
-      })
+          const nextState = { ...prev }
+          delete nextState[card.id]
+          return nextState
+        })
+      }
       setImageEditPendingCardId(null)
     }
   }
@@ -1850,6 +2058,7 @@ export default function KanbanPage() {
   const renderImageCard = (card, showAttributes = false) => {
     const runtimeState = getCardRuntimeState(card)
     const cardLocked = runtimeState?.status === 'processing'
+    const canFetchTencentResult = canFetchTencentMeshResult(runtimeState)
     const displaySourceLabel = runtimeState?.source
       ? String(runtimeState.source).toUpperCase()
       : card.sourceLabel
@@ -2157,6 +2366,12 @@ export default function KanbanPage() {
                   <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>play_arrow</span>
                   Action
                 </button>
+                {canFetchTencentResult && (
+                  <button className="image-card__edit-action-btn" onClick={() => handleGetTencentMeshResult(card)} disabled={imageEditPendingCardId === card.id}>
+                    <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>refresh</span>
+                    GET RESULT
+                  </button>
+                )}
 
                 {imageEditDraft?.cardId === card.id && !imageEditDraft?.mode && imageEditPendingCardId !== card.id && (
                   <div className="image-card__edit-action-menu">
@@ -2192,6 +2407,9 @@ export default function KanbanPage() {
                             value={imageEditDraft.selectedAssetId}
                             onChange={event => handleImageEditDraftChange(card, 'selectedAssetId', event.target.value)}
                           >
+                            {isMeshGenCard && isTencentMeshGenerationApi(imageEditDraft.selectedApi) && (
+                              <option value="">No image source (use prompt)</option>
+                            )}
                             {apiSourceGroups.length === 0 && <option value="">{isMeshEditCard || isTexturingCard ? 'No meshes available' : 'No images available'}</option>}
                             {apiSourceGroups.map(group => (
                               <optgroup key={group.asset.id} label={group.asset.name}>
@@ -2227,6 +2445,9 @@ export default function KanbanPage() {
                             value={imageEditDraft.promptSource}
                             onChange={event => handleImageEditDraftChange(card, 'promptSource', event.target.value)}
                           >
+                            {isMeshGenCard && isTencentMeshGenerationApi(imageEditDraft.selectedApi) && (
+                              <option value="none">No prompt (use image)</option>
+                            )}
                             {getPromptOptionsForCard(card.id).map(option => (
                               <option key={option.id} value={option.id}>{option.label}</option>
                             ))}
@@ -2243,6 +2464,88 @@ export default function KanbanPage() {
                               placeholder="Enter a custom prompt"
                             />
                           </div>
+                        )}
+
+                        {isMeshGenCard && isTencentMeshGenerationApi(imageEditDraft.selectedApi) && (
+                          <>
+                            <div className="params-card__field">
+                              <label className="params-card__label font-label">Region</label>
+                              <select
+                                className="image-card__attribute-select"
+                                value={imageEditDraft.region}
+                                onChange={event => handleImageEditDraftChange(card, 'region', event.target.value)}
+                              >
+                                {TENCENT_REGION_OPTIONS.map(option => (
+                                  <option key={option} value={option}>{option}</option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div className="params-card__field">
+                              <label className="params-card__label font-label">Model</label>
+                              <select
+                                className="image-card__attribute-select"
+                                value={imageEditDraft.modelVersion}
+                                onChange={event => handleImageEditDraftChange(card, 'modelVersion', event.target.value)}
+                              >
+                                {TENCENT_MODEL_VERSION_OPTIONS.map(option => (
+                                  <option key={option} value={option}>{option}</option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div className="params-card__field">
+                              <label className="params-card__label font-label">Generation Type</label>
+                              <select
+                                className="image-card__attribute-select"
+                                value={imageEditDraft.generationType}
+                                onChange={event => handleImageEditDraftChange(card, 'generationType', event.target.value)}
+                              >
+                                {TENCENT_GENERATION_TYPE_OPTIONS.map(option => (
+                                  <option key={option} value={option}>{option}</option>
+                                ))}
+                              </select>
+                            </div>
+
+                            {imageEditDraft.generationType === 'LowPoly' && (
+                              <div className="params-card__field">
+                                <label className="params-card__label font-label">Polygon Type</label>
+                                <select
+                                  className="image-card__attribute-select"
+                                  value={imageEditDraft.polygonType}
+                                  onChange={event => handleImageEditDraftChange(card, 'polygonType', event.target.value)}
+                                >
+                                  {TENCENT_POLYGON_TYPE_OPTIONS.map(option => (
+                                    <option key={option} value={option}>{option}</option>
+                                  ))}
+                                </select>
+                              </div>
+                            )}
+
+                            <div className="params-card__field">
+                              <label className="params-card__label font-label">Face Count</label>
+                              <input
+                                type="number"
+                                min="3000"
+                                max="1500000"
+                                className="params-card__input"
+                                value={imageEditDraft.faceCount}
+                                onChange={event => handleImageEditDraftChange(card, 'faceCount', event.target.value)}
+                              />
+                            </div>
+
+                            <div className="params-card__field">
+                              <label className="params-card__label font-label">Enable PBR</label>
+                              <label className="params-card__checkbox-label">
+                                <div className={`params-card__checkbox ${imageEditDraft.enablePBR ? 'params-card__checkbox--checked' : 'params-card__checkbox--unchecked'}`} onClick={() => handleImageEditDraftChange(card, 'enablePBR', !imageEditDraft.enablePBR)}>
+                                  {imageEditDraft.enablePBR && <span className="material-symbols-outlined" style={{ fontSize: '10px', color: 'var(--on-tertiary)', fontWeight: 700 }}>check</span>}
+                                </div>
+                                <span>Generate a PBR-ready mesh</span>
+                              </label>
+                            </div>
+
+                            <p className="image-card__param-hint">Provide either a prompt or an image source for Tencent Cloud mesh generation.</p>
+                          </>
                         )}
                       </>
                     ) : (

@@ -135,6 +135,18 @@ export const DEFAULT_SETTINGS = {
           }
         }
       },
+    tencentcloud: {
+      secretId: '',
+      secretKey: '',
+      meshGeneration: {
+        models: {
+          meshgeneration: {
+            name: 'Hunyuan3D Pro',
+            model: 'meshgeneration'
+          }
+        }
+      }
+    },
     comfyui: {
       path: '',
       url: 'http://127.0.0.1',
