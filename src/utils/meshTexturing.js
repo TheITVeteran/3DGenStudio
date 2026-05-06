@@ -289,31 +289,26 @@ function getOrBuildIslandPath(paintTarget, islandIndex) {
 
 export async function loadMeshRootFromUrl(url) {
   const startedAt = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now()
-  console.log('[meshTexturing] loadMeshRootFromUrl:start', { url })
   const extension = getExtensionFromUrl(url)
 
   if (extension === '.glb' || extension === '.gltf') {
     const root = (await loadWithLoader(new GLTFLoader(), url))?.scene || null
-    console.log('[meshTexturing] loadMeshRootFromUrl:done', { url, elapsedMs: Math.round(((typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now()) - startedAt) * 10) / 10, type: 'gltf' })
     return root
   }
 
   if (extension === '.obj') {
     const root = await loadWithLoader(new OBJLoader(), url)
-    console.log('[meshTexturing] loadMeshRootFromUrl:done', { url, elapsedMs: Math.round(((typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now()) - startedAt) * 10) / 10, type: 'obj' })
     return root
   }
 
   if (extension === '.fbx') {
     const root = await loadWithLoader(new FBXLoader(), url)
-    console.log('[meshTexturing] loadMeshRootFromUrl:done', { url, elapsedMs: Math.round(((typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now()) - startedAt) * 10) / 10, type: 'fbx' })
     return root
   }
 
   if (extension === '.stl') {
     const geometry = await loadWithLoader(new STLLoader(), url)
     const root = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: '#cfd8ff' }))
-    console.log('[meshTexturing] loadMeshRootFromUrl:done', { url, elapsedMs: Math.round(((typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now()) - startedAt) * 10) / 10, type: 'stl' })
     return root
   }
 
@@ -324,7 +319,6 @@ export async function loadMeshRootFromUrl(url) {
     }
 
     const root = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: '#cfd8ff' }))
-    console.log('[meshTexturing] loadMeshRootFromUrl:done', { url, elapsedMs: Math.round(((typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now()) - startedAt) * 10) / 10, type: 'ply' })
     return root
   }
 
@@ -333,7 +327,6 @@ export async function loadMeshRootFromUrl(url) {
 
 export async function loadTexturableMeshFromUrl(url) {
   const startedAt = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now()
-  console.log('[meshTexturing] loadTexturableMeshFromUrl:start', { url })
   const root = await loadMeshRootFromUrl(url)
 
   return loadTexturableMeshFromRoot(root, { url, startedAt })
@@ -365,13 +358,6 @@ export async function loadTexturableMeshFromRoot(root, { url = '', startedAt: ex
         texturedMaterials.push({ child, material, texture: material.map })
       }
     })
-
-  console.log('[meshTexturing] loadTexturableMeshFromRoot:scan', {
-    url,
-    elapsedMs: Math.round(((typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now()) - startedAt) * 10) / 10,
-    hasUvs,
-    texturedMaterialCount: texturedMaterials.length
-  })
   })
 
   if (!hasUvs) {
@@ -412,12 +398,6 @@ export async function loadTexturableMeshFromRoot(root, { url = '', startedAt: ex
   }
 
   if (uniqueTextureKeys.size > 1) {
-    console.log('[meshTexturing] loadTexturableMeshFromRoot:done', {
-      url,
-      elapsedMs: Math.round(((typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now()) - startedAt) * 10) / 10,
-      supported: false,
-      reason: 'multiple texture maps'
-    })
     return {
       root,
       textureCanvas: null,
@@ -437,15 +417,6 @@ export async function loadTexturableMeshFromRoot(root, { url = '', startedAt: ex
     if (paintTarget) {
       paintTargetsByMeshUuid[child.uuid] = paintTarget
     }
-  })
-
-  console.log('[meshTexturing] loadTexturableMeshFromRoot:done', {
-    url,
-    elapsedMs: Math.round(((typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now()) - startedAt) * 10) / 10,
-    supported: true,
-    textureWidth: textureCanvas.width,
-    textureHeight: textureCanvas.height,
-    paintTargetCount: Object.keys(paintTargetsByMeshUuid).length
   })
 
   return {
@@ -984,38 +955,6 @@ function waitForNextFrame() {
     }
 
     setTimeout(resolve, 0)
-  })
-}
-
-function splatProjectedColor(accumulatedColor, accumulatedWeight, textureWidth, textureHeight, x, y, rgba, weight) {
-  const clampedX = THREE.MathUtils.clamp(x - 0.5, 0, textureWidth - 1)
-  const clampedY = THREE.MathUtils.clamp(y - 0.5, 0, textureHeight - 1)
-  const x0 = Math.floor(clampedX)
-  const y0 = Math.floor(clampedY)
-  const x1 = Math.min(textureWidth - 1, x0 + 1)
-  const y1 = Math.min(textureHeight - 1, y0 + 1)
-  const tx = clampedX - x0
-  const ty = clampedY - y0
-
-  ;[
-    [x0, y0, (1 - tx) * (1 - ty)],
-    [x1, y0, tx * (1 - ty)],
-    [x0, y1, (1 - tx) * ty],
-    [x1, y1, tx * ty]
-  ].forEach(([pixelX, pixelY, pixelWeight]) => {
-    if (pixelWeight <= 0) {
-      return
-    }
-
-    const nextWeight = weight * pixelWeight
-    const pixelIndex = pixelY * textureWidth + pixelX
-    const colorIndex = pixelIndex * 4
-
-    accumulatedColor[colorIndex] += rgba[0] * nextWeight
-    accumulatedColor[colorIndex + 1] += rgba[1] * nextWeight
-    accumulatedColor[colorIndex + 2] += rgba[2] * nextWeight
-    accumulatedColor[colorIndex + 3] += rgba[3] * nextWeight
-    accumulatedWeight[pixelIndex] += nextWeight
   })
 }
 
@@ -1607,40 +1546,6 @@ export async function accumulateProjectedPatch({
   }
 }
 
-function gaussianBlurWeight(weightMap, width, height, radius) {
-  const kernelSize = Math.ceil(radius * 2)
-  const kernel = []
-  let kernelSum = 0
-  const sigma = radius / 2
-  for (let y = -kernelSize; y <= kernelSize; y++) {
-    for (let x = -kernelSize; x <= kernelSize; x++) {
-      const d = Math.sqrt(x*x + y*y)
-      const val = Math.exp(-(d*d) / (2*sigma*sigma))
-      kernel.push(val)
-      kernelSum += val
-    }
-  }
-  // Normalize kernel
-  for (let i = 0; i < kernel.length; i++) kernel[i] /= kernelSum
-  
-  const result = new Float32Array(weightMap.length)
-  for (let py = 0; py < height; py++) {
-    for (let px = 0; px < width; px++) {
-      let sum = 0
-      let ki = 0
-      for (let ky = -kernelSize; ky <= kernelSize; ky++) {
-        for (let kx = -kernelSize; kx <= kernelSize; kx++) {
-          const sx = Math.min(width-1, Math.max(0, px + kx))
-          const sy = Math.min(height-1, Math.max(0, py + ky))
-          sum += weightMap[sy * width + sx] * kernel[ki++]
-        }
-      }
-      result[py * width + px] = sum
-    }
-  }
-  return result
-}
-
 /**
  * Normalizes the accumulated color/weight buffers and blends the result into
  * textureCanvas in-place. Call this once after all views have been accumulated.
@@ -1673,34 +1578,3 @@ export function finalizeProjectedPatch({ textureCanvas, accumulatedColor, accumu
   return { appliedPixels }
 }
 
-// Add this helper function to smooth weight transitions
-function blurWeightMap(weightMap, width, height, radius) {
-  const result = new Float32Array(weightMap.length)
-  const kernelSize = Math.ceil(radius)
-  
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      let totalWeight = 0
-      let sampleCount = 0
-      
-      // Sample nearby pixels in a square kernel
-      for (let dy = -kernelSize; dy <= kernelSize; dy++) {
-        for (let dx = -kernelSize; dx <= kernelSize; dx++) {
-          const sampleX = Math.max(0, Math.min(width - 1, x + dx))
-          const sampleY = Math.max(0, Math.min(height - 1, y + dy))
-          const distance = Math.sqrt(dx * dx + dy * dy)
-          
-          if (distance <= radius) {
-            const gaussianWeight = Math.exp(-(distance * distance) / (2 * radius * radius))
-            totalWeight += weightMap[sampleY * width + sampleX] * gaussianWeight
-            sampleCount += gaussianWeight
-          }
-        }
-      }
-      
-      result[y * width + x] = sampleCount > 0 ? totalWeight / sampleCount : 0
-    }
-  }
-  
-  return result
-}

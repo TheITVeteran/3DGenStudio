@@ -174,8 +174,6 @@ export default function KanbanPage() {
   const [showSettings, setShowSettings] = useState(false)
   const [imageDraft, setImageDraft] = useState(null) // null | { mode: 'select'|'local'|'comfy'|'api' }
   const [pendingImageGeneration, setPendingImageGeneration] = useState(null)
-  const [libraryAssets, setLibraryAssets] = useState({ images: [], meshes: [] })
-  const [libraryLoading, setLibraryLoading] = useState(false)
   const [comfyWorkflows, setComfyWorkflows] = useState([])
   const [comfyLoading, setComfyLoading] = useState(false)
   const [imageCardPages, setImageCardPages] = useState({})
@@ -327,14 +325,14 @@ export default function KanbanPage() {
     }
   }
 
-  const refreshProjectAssets = async () => {
+  const refreshProjectAssets = useCallback(async () => {
     const [assetsData, cardsData] = await Promise.all([
       getProjectAssets(projectId),
       getProjectCards(projectId)
     ])
     setAssets(assetsData)
     setProjectCards(cardsData)
-  }
+  }, [getProjectAssets, getProjectCards, projectId])
 
   const ensureGeneratedMeshThumbnail = async (asset) => {
     if (!asset || asset.type !== 'mesh' || asset.thumbnail) {
@@ -479,41 +477,13 @@ export default function KanbanPage() {
 
 	const openAssetLibrary = async (cardId = imageDraft?.cardId || null) => {
 		try {
-			setLibraryLoading(true);
 			await getLibraryAssets(); // preload library if needed
 			handleOpenAssetSelector(cardId);
 		} catch (err) {
 			console.error('Failed to load asset library:', err);
 			showStatusMessage(err.message || 'Failed to load assets library', 'error');
-		} finally {
-			setLibraryLoading(false);
 		}
 	};
-
-  const handleAttachLibraryImage = async (libraryImage) => {
-    try {
-      setLoading(true)
-      const cardId = imageDraft?.cardId || createImageCardId()
-      await attachExistingAsset(projectId, {
-        filename: libraryImage.filename,
-        type: 'image',
-        name: libraryImage.name,
-        metadata: {
-          resolution: 'Unknown',
-          format: libraryImage.extension,
-          source: 'ASSET LIB',
-          cardId
-        }
-      })
-      await refreshProjectAssets()
-      setImageDraft(null)
-    } catch (err) {
-      console.error('Failed to attach image from assets:', err)
-      showStatusMessage(err.message || 'Failed to attach image from assets', 'error')
-    } finally {
-      setLoading(false)
-    }
-  }
 
   const handleRemoveImage = async (assetId) => {
     try {
@@ -689,7 +659,7 @@ export default function KanbanPage() {
 			setAssetSelectorOpen(false);
 			setPendingAssetCardId(null);
 		}
-	}, [attachExistingAsset, projectId, refreshProjectAssets]);
+  }, [attachExistingAsset, pendingAssetCardId, projectId, refreshProjectAssets]);
 
   const imageCards = useMemo(() => {
     const cards = new Map()

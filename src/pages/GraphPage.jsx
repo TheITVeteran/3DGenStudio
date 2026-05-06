@@ -714,7 +714,6 @@ const GraphAssetNode = memo(function GraphAssetNode({ data }) {
   const navigate = useNavigate()
   const updateNodeInternals = useUpdateNodeInternals()
   const isMeshGen = data.nodeKind === 'meshGen'
-  const libraryAssetOptions = isMeshGen ? (data.libraryMeshOptions || []) : (data.libraryImageOptions || [])
   const previewFilename = data.asset?.thumbnail || data.asset?.filename || null
   const previewUrl = getAssetPreviewUrl(previewFilename)
   const meshModelUrl = isMeshGen && data.asset?.filename ? getAssetPreviewUrl(data.asset.filename) : null
@@ -741,7 +740,9 @@ const GraphAssetNode = memo(function GraphAssetNode({ data }) {
       ? data.imageEditWorkflows
       : data.imageGenerationWorkflows)
     .find(workflow => workflow.id == draft?.workflowId) || null
-  const inputConnectors = data.inputConnectors || [{ id: DEFAULT_INPUT_ID, type: null, isConnected: false }]
+  const inputConnectors = useMemo(() => {
+    return data.inputConnectors || [{ id: DEFAULT_INPUT_ID, type: null, isConnected: false }]
+  }, [data.inputConnectors])
   const inputSources = data.inputSources || []
   const outputConnector = data.outputConnector || { id: DEFAULT_OUTPUT_ID, type: isMeshGen ? 'mesh' : 'image' }
   const hasOutputAsset = Boolean(data.asset?.id)
@@ -1816,7 +1817,7 @@ const GraphAssetNode = memo(function GraphAssetNode({ data }) {
 
 const GraphImageCompareNode = memo(function GraphImageCompareNode({ data }) {
   const [refreshKey, setRefreshKey] = useState(0)
-  const [comparePosition, setComparePosition] = useState(50)
+  const [compareState, setCompareState] = useState({ key: '', position: 50 })
   const inputConnectors = data.inputConnectors || IMAGE_COMPARE_INPUT_IDS.map(id => ({ id, type: 'image', isConnected: false }))
   const leftSource = (data.inputSources || []).find(source => source.connectorId === IMAGE_COMPARE_INPUT_IDS[0]) || null
   const rightSource = (data.inputSources || []).find(source => source.connectorId === IMAGE_COMPARE_INPUT_IDS[1]) || null
@@ -1824,13 +1825,11 @@ const GraphImageCompareNode = memo(function GraphImageCompareNode({ data }) {
   const rightAsset = rightSource?.asset || null
   const leftPreviewUrl = appendCacheBust(getAssetPreviewUrl(leftAsset?.thumbnail || leftAsset?.filename), refreshKey)
   const rightPreviewUrl = appendCacheBust(getAssetPreviewUrl(rightAsset?.thumbnail || rightAsset?.filename), refreshKey)
+  const compareKey = `${leftPreviewUrl || ''}|${rightPreviewUrl || ''}`
+  const comparePosition = compareState.key === compareKey ? compareState.position : 50
   const hasBothImages = Boolean(leftPreviewUrl && rightPreviewUrl)
   const nodeDisplayName = data.name || data.nodeTypeName || IMAGE_COMPARE_NODE_TYPE_NAME
   const connectedInputCount = inputConnectors.filter(connector => connector.isConnected).length
-
-  useEffect(() => {
-    setComparePosition(50)
-  }, [leftPreviewUrl, rightPreviewUrl])
 
   const handlePointerMove = useCallback((event) => {
     if (!hasBothImages) {
@@ -1843,8 +1842,11 @@ const GraphImageCompareNode = memo(function GraphImageCompareNode({ data }) {
     }
 
     const nextPosition = ((event.clientX - bounds.left) / bounds.width) * 100
-    setComparePosition(Math.max(0, Math.min(100, nextPosition)))
-  }, [hasBothImages])
+    setCompareState({
+      key: compareKey,
+      position: Math.max(0, Math.min(100, nextPosition))
+    })
+  }, [compareKey, hasBothImages])
 
   return (
     <div className="graph-node graph-node--imageCompare">
@@ -2461,9 +2463,10 @@ export default function GraphPage({ project }) {
   }, [nodes, project.id, replaceFlowNodeData, setNodes, updateProjectNode])
 
   useEffect(() => {
+    const subscriptions = progressSubscriptionsRef.current
     return () => {
-      progressSubscriptionsRef.current.forEach(unsubscribe => unsubscribe?.())
-      progressSubscriptionsRef.current.clear()
+      subscriptions.forEach(unsubscribe => unsubscribe?.())
+      subscriptions.clear()
     }
   }, [])
 
@@ -4081,7 +4084,7 @@ export default function GraphPage({ project }) {
       },
       onCloseAction: () => setActionDraftsByNodeId({})
     }
-  })}), [actionDraftsByNodeId, attachExistingAsset, closeNodeProgressSubscription, comfyLoading, createImageEditNodeDraft, createImageNodeDraft, createMeshGenNodeDraft, createProjectConnection, edges, ensureComfyWorkflowsLoaded, ensureGeneratedMeshThumbnails, ensureLibraryLoaded, generateImage, getConnectedInputAssetFrom, handleCreateNode, handleNodeNameChange, handleNodeNameCommit, handleNodeOutputValueChange, handleNodeOutputValueCommit, imageEditApis, imageEditWorkflows, imageGenerationApis, imageGenerationWorkflows, libraryImageOptions, libraryLoading, meshGenerationApis, meshGenerationWorkflows, nodes, openActionDraft, project.id, pushMeshGenerationFailureNotification, queryTencentMeshGenerationResult, queryTripoMeshGenerationResult, replaceFlowNodeData, runComfyWorkflow, runImageEditApi, runImageEditComfy, runMeshGenerationApi, setEdges, setNodeTransientData, setNodes, subscribeToComfyWorkflowProgress, updateProjectNode])
+  })}), [actionDraftsByNodeId, attachExistingAsset, closeNodeProgressSubscription, comfyLoading, createImageEditNodeDraft, createImageNodeDraft, createMeshGenNodeDraft, createProjectConnection, edges, ensureComfyWorkflowsLoaded, ensureGeneratedMeshThumbnails, ensureLibraryLoaded, generateImage, getConnectedInputAssetFrom, handleCreateNode, handleNodeNameChange, handleNodeNameCommit, handleNodeOutputValueChange, handleNodeOutputValueCommit, handleOpenAssetSelector, imageEditApis, imageEditWorkflows, imageGenerationApis, imageGenerationWorkflows, libraryImageOptions, libraryLoading, libraryMeshOptions, meshGenerationApis, meshGenerationWorkflows, nodes, openActionDraft, project.id, pushMeshGenerationFailureNotification, queryTencentMeshGenerationResult, queryTripoMeshGenerationResult, replaceFlowNodeData, runComfyWorkflow, runImageEditApi, runImageEditComfy, runMeshGenerationApi, setEdges, setNodeTransientData, setNodes, subscribeToComfyWorkflowProgress, updateProjectNode])
 
   const handleFileUpload = useCallback(async (event) => {
     const file = event.target.files?.[0]

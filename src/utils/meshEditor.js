@@ -213,7 +213,6 @@ function loadWithLoader(loader, url) {
 }
 
 function createMergedGeometryFromObject(object) {
-  const startedAt = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now()
   const root = object?.scene || object
 
   if (!root) {
@@ -223,15 +222,11 @@ function createMergedGeometryFromObject(object) {
   root.updateMatrixWorld(true)
 
   const geometries = []
-  let meshCount = 0
-  let sourceVertexCount = 0
   root.traverse(child => {
     if (!child.isMesh || !child.geometry?.attributes?.position) {
       return
     }
 
-    meshCount += 1
-    sourceVertexCount += child.geometry.attributes.position.count
     const geometry = child.geometry.clone()
     geometry.applyMatrix4(child.matrixWorld)
     geometries.push(geometry.index ? geometry.toNonIndexed() : geometry)
@@ -843,11 +838,8 @@ export function getSelectedHoleLoops(geometry, { selectionMode = 'face', selecte
 }
 
 export async function loadEditableGeometryFromUrl(url) {
-  const startedAt = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now()
   const geometry = await loadGeometryFromUrl(url)
-  const geometryLoadedAt = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now()
   const indexedGeometry = loadEditableGeometryFromObject(geometry)
-  const compactedAt = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now()
   return indexedGeometry
 }
 

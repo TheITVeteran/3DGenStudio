@@ -7,8 +7,6 @@ import { randomUUID } from 'crypto';
 import { createAssetEditRecord, createBrushChildRecord, resolveProjectImageSource, resolveProjectMeshSource } from './storage.js';
 import fs from 'fs/promises';
 import si from 'systeminformation';
-import { exec } from 'child_process';
-import util from 'util';
 import tencentcloudSdk from 'tencentcloud-sdk-nodejs-intl-en';
 import {
   ASSETS_DIR,

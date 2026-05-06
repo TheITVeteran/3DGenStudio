@@ -27,7 +27,6 @@ import {
   subdivideSelectedFaces
 } from '../utils/meshEditor'
 import {
-  applyProjectedTexturePatch,
   buildAssetUrl,
   canvasToFile,
   captureTexturedMeshView,
@@ -39,7 +38,6 @@ import {
   drawCanvasStroke,
   drawUvStroke,
   exportTexturedMeshToGlb,
-  getDefaultTextureWorkflowParameterIds,
   getMaskBoundingBox,
   getTextureKeyFromMaterial,
   getUvIslandHitInfo,
@@ -85,18 +83,6 @@ function getRectangleBounds(startPoint, endPoint) {
     right: Math.max(startPoint.x, endPoint.x),
     top: Math.min(startPoint.y, endPoint.y),
     bottom: Math.max(startPoint.y, endPoint.y)
-  }
-}
-
-function getSupersampledCanvasSize(width, height, targetMinDimension = 1024) {
-  const maxDim = Math.max(width, height)
-  if (maxDim >= targetMinDimension) {
-    return { width, height }
-  }
-  const scale = targetMinDimension / maxDim
-  return {
-    width: Math.round(width * scale),
-    height: Math.round(height * scale)
   }
 }
 
@@ -385,7 +371,6 @@ function generateBlurBorderGradient(sourceMaskCanvas, targetWidth, targetHeight,
 function CameraRig({ geometry, frameKey, onCameraReady, controlsEnabled = true }) {
   const { camera } = useThree()
   const controlsRef = useRef(null)
-  const [distanceBounds, setDistanceBounds] = useState({ minDistance: 0.001, maxDistance: 100 })
   const lastFramedKeyRef = useRef(null)
 
   useEffect(() => {
@@ -412,8 +397,6 @@ function CameraRig({ geometry, frameKey, onCameraReady, controlsEnabled = true }
     const minDistance = Math.max(radius * 0.0025, 0.0005)
     const maxDistance = Math.max(radius * 24, 24)
 
-    setDistanceBounds({ minDistance, maxDistance })
-
     camera.position.set(center.x + distance, center.y + distance * 0.65, center.z + distance)
      
     Object.assign(camera, {
@@ -437,8 +420,8 @@ function CameraRig({ geometry, frameKey, onCameraReady, controlsEnabled = true }
       makeDefault
       enabled={controlsEnabled}
       enableDamping
-      minDistance={distanceBounds.minDistance}
-      maxDistance={distanceBounds.maxDistance}
+      minDistance={0.001}
+      maxDistance={100}
       mouseButtons={{
         LEFT: null,
         MIDDLE: THREE.MOUSE.ROTATE,
@@ -687,10 +670,8 @@ export default function MeshEditorPage() {
   const patchedTextureRef = useRef(null)
   const projectionViewDataRef = useRef([])
   const [imageParamSources, setImageParamSources] = useState({});
-  const [localImageFiles, setLocalImageFiles] = useState({});
   const [showAssetSelector, setShowAssetSelector] = useState(false);
   const [pendingAssetParamId, setPendingAssetParamId] = useState(null);
-  const [uploadingImages, setUploadingImages] = useState(false);
 
   // --- Painting mode state ---
   const [paintBrushSource, setPaintBrushSource] = useState('asset'); // 'asset' | 'computer'
@@ -1837,13 +1818,7 @@ export default function MeshEditorPage() {
       try {
         setLoading(true)
         setError('')
-        const startedAt = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now()
-
-        const rootStartedAt = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now()
         const loadedRoot = await loadMeshRootFromUrl(modelUrl)
-        const rootLoadedAt = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now()
-
-        const geometryStartedAt = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now()
         const texturableStartedAt = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now()
 
         const geometryPromise = Promise.resolve().then(() => loadEditableGeometryFromObject(loadedRoot)).then(loadedGeometry => {
@@ -1955,10 +1930,6 @@ export default function MeshEditorPage() {
     setTextureWorkflowInputs(createTexturePaintWorkflowDraft(selectedTextureWorkflow))
   }, [selectedTextureWorkflow])
 
-  const textureWorkflowParameterIds = useMemo(() => {
-    return getDefaultTextureWorkflowParameterIds(selectedTextureWorkflow)
-  }, [selectedTextureWorkflow])
-
   const texturingUnavailableReason = useMemo(() => {
     if (geometryRevision > 0) {
       return 'Texture painting works on the original UV mesh. Save and reopen the mesh after topology edits to paint accurately.'
@@ -2003,16 +1974,6 @@ export default function MeshEditorPage() {
     });
   };
 
-  const loadAssetAsFile = useCallback(async (asset) => {
-    const url = asset.url || (asset.filename ? `http://localhost:3001/assets/${encodeURI(asset.filename)}` : '');
-    if (!url) throw new Error('Asset URL not found');
-    const response = await fetch(url);
-    if (!response.ok) throw new Error('Failed to fetch asset');
-    const blob = await response.blob();
-    const fileName = asset.name || 'image.png';
-    return new File([blob], fileName, { type: blob.type || 'image/png' });
-  }, []);
-
   useEffect(() => {
     if (!selectedTextureWorkflow) {
       setImageParamSources({});
@@ -2048,7 +2009,6 @@ export default function MeshEditorPage() {
       }
     }
     setImageParamSources(defaultSources);
-    setLocalImageFiles({});
   }, [selectedTextureWorkflow]);
 
   const texturingReady = !loading && !texturingUnavailableReason && !!selectedTextureWorkflow && !!displayTextureRef.current && !!maskTextureRef.current
@@ -2130,10 +2090,12 @@ export default function MeshEditorPage() {
   }, [rebuildProjectedTexturePreview, projectionOpacities])
 
   const stats = useMemo(() => ({
+    geometryRevision,
     vertices: geometry?.attributes?.position?.count || 0,
     faces: geometryFaceCount(geometry)
   }), [geometry, geometryRevision])
   const availableHoleLoops = useMemo(() => {
+    void geometryRevision
     if (!geometry) {
       return []
     }
@@ -2917,7 +2879,7 @@ export default function MeshEditorPage() {
       startPoint: dragStateRef.current.startPoint,
       endPoint: nextPoint
     })
-  }, [activeMenu, applySculptStamp, brushSize, computeSculptCursorPixelRadius, ensureSculptMesh, getMeshIntersection, getPointerPosition, paintBrushSize, paintColor, paintFlow, paintHardness, paintMode, paintRotation, recompositePaintTexture, sculptSpacing, sculptSteadyStroke, sculptStrength, stampBrushAtUv, texturableMesh])
+  }, [activeMenu, applySculptStamp, brushSize, computeSculptCursorPixelRadius, ensureSculptMesh, getMeshIntersection, getPointerPosition, paintBrushSize, paintColor, paintFlow, paintHardness, paintMode, paintRotation, recompositePaintTexture, sculptSpacing, sculptSteadyStroke, sculptStrength, stampBrushAtUv, texturableMesh, updateMaskOverlay])
 
   const handleCanvasPointerUp = useCallback((event) => {
     if (activeMenu === 'sculpting') {

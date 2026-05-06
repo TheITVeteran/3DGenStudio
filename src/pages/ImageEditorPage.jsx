@@ -504,6 +504,7 @@ export default function ImageEditorPage() {
   }, [activeLayer, layers])
 
   const maskHasPixels = useMemo(() => {
+    void maskRevision
     const maskCanvas = maskCanvasRef.current
     if (!maskCanvas) return false
     const imageData = maskCanvas.getContext('2d').getImageData(0, 0, maskCanvas.width, maskCanvas.height).data
@@ -927,7 +928,7 @@ export default function ImageEditorPage() {
 
     interactionRef.current.last = point
     event.preventDefault()
-  }, [bumpMask, bumpRender, drawInterpolated, getPointInCanvas, stampMask, stampPaint, updateCursorPreviewFromEvent])
+  }, [bumpMask, bumpRender, drawInterpolated, getPointInCanvas, maskSize, paintSize, stampMask, stampPaint, updateCursorPreviewFromEvent])
 
   const handleShellPointerMove = useCallback((event) => {
     const interaction = panInteractionRef.current
