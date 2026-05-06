@@ -7,6 +7,7 @@ import Header from '../components/Header'
 import Footer from '../components/Footer'
 import SettingsModal from '../components/SettingsModal'
 import { useProjects } from '../context/ProjectContext'
+import { useNotifications } from '../context/NotificationContext'
 import { createMeshThumbnailFile } from '../utils/meshThumbnail'
 import {
   bridgeSelectedHoleSegments,
@@ -610,6 +611,7 @@ export default function MeshEditorPage() {
     getPaintDocument,
     savePaintDocument
   } = useProjects()
+  const { addNotification } = useNotifications()
 
   const [showSettings, setShowSettings] = useState(false)
   const [showShadows, setShowShadows] = useState(false)
@@ -3595,8 +3597,15 @@ export default function MeshEditorPage() {
           : 'Patch ready — adjust the review sliders, then click Apply or Cancel.'
       );
     } catch (textureError) {
-      setError(textureError.message || 'Failed to regenerate the mesh texture.');
+      const failureMessage = textureError.message || 'Failed to regenerate the mesh texture.'
+      setError(failureMessage);
       setFeedback('');
+      addNotification({
+        title: 'Mesh edit failed',
+        message: failureMessage,
+        source: 'ComfyUI',
+        tone: 'error'
+      })
     } finally {
       setTexturing(false);
     }
@@ -3606,7 +3615,7 @@ export default function MeshEditorPage() {
     projectId, runComfyWorkflow, selectedTextureWorkflow,
     subscribeToComfyWorkflowProgress, texturableMesh,
     textureWorkflowInputs, texturing, updateProjectNode,
-    updateMaskOverlay, imageParamSources
+    updateMaskOverlay, imageParamSources, addNotification
   ]);
 
   const handleApplyPatch = useCallback(() => {

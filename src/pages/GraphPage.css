@@ -492,6 +492,17 @@
   margin-top: 0.75rem;
 }
 
+.graph-node__primary-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  flex-wrap: wrap;
+}
+
+.graph-node__edit-action {
+  margin-left: auto;
+}
+
 .graph-node__panel-title {
   font-size: 0.62rem;
   color: var(--primary);

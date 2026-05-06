@@ -596,7 +596,13 @@ export default function KanbanPage() {
     } catch (err) {
       console.error('Image generation failed:', err)
       setImageDraft(draft)
-      showStatusMessage(err.message || 'Image generation failed', 'error')
+      const failureMessage = err.message || 'Image generation failed'
+      showStatusMessage(failureMessage, 'error')
+      pushExternalApiFailureNotification(
+        'Image generation failed',
+        failureMessage,
+        imageGenerationApis.find(api => api.id === draft?.selectedApi)?.name || 'Image generation API'
+      )
     } finally {
       setPendingImageGeneration(null)
       setLoading(false)
@@ -937,6 +943,15 @@ export default function KanbanPage() {
   const getApiOptionsForCard = (card) => getApiOptionsForColumnId(card?.kanbanColumnId)
 
   const getDefaultApiForCard = (card) => getApiOptionsForCard(card)[0]?.id || ''
+
+  const pushExternalApiFailureNotification = (title, message, source = 'External API') => {
+    addNotification({
+      title,
+      message: message || 'External API request failed',
+      source,
+      tone: 'error'
+    })
+  }
 
   const getAttributeOptionsForCard = (cardId, typeName) => {
     const matchingAttributes = (cardAttributesByCardId[cardId] || []).filter(attribute => {
@@ -2014,17 +2029,36 @@ export default function KanbanPage() {
 
       showStatusMessage(failureMessage, 'error')
 
-      if (isMeshGenCard && imageEditDraft?.mode === 'api') {
-        addNotification({
-          title: 'Mesh generation failed',
-          message: failureMessage,
-          source: isTencentMeshGenerationApi(imageEditDraft?.selectedApi)
-            ? 'Tencent Cloud · Hunyuan3D Pro'
-            : isTripoMeshGenerationApi(imageEditDraft?.selectedApi)
-              ? 'Tripo AI'
-              : 'Mesh generation API',
-          tone: 'error'
-        })
+      if (imageEditDraft?.mode === 'api') {
+        if (isMeshGenCard) {
+          pushExternalApiFailureNotification(
+            'Mesh generation failed',
+            failureMessage,
+            isTencentMeshGenerationApi(imageEditDraft?.selectedApi)
+              ? 'Tencent Cloud · Hunyuan3D Pro'
+              : isTripoMeshGenerationApi(imageEditDraft?.selectedApi)
+                ? 'Tripo AI'
+                : meshGenerationApis.find(api => api.id === imageEditDraft?.selectedApi)?.name || 'Mesh generation API'
+          )
+        } else if (isMeshEditCard) {
+          pushExternalApiFailureNotification(
+            'Mesh edit failed',
+            failureMessage,
+            meshEditApis.find(api => api.id === imageEditDraft?.selectedApi)?.name || 'Mesh edit API'
+          )
+        } else if (isTexturingCard) {
+          pushExternalApiFailureNotification(
+            'Mesh texturing failed',
+            failureMessage,
+            meshTexturingApis.find(api => api.id === imageEditDraft?.selectedApi)?.name || 'Mesh texturing API'
+          )
+        } else {
+          pushExternalApiFailureNotification(
+            'Image edit failed',
+            failureMessage,
+            imageEditApis.find(api => api.id === imageEditDraft?.selectedApi)?.name || 'Image edit API'
+          )
+        }
       }
     } finally {
       if (!keepRuntimeState) {

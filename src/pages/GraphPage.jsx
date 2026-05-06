@@ -1092,28 +1092,30 @@ const GraphAssetNode = memo(function GraphAssetNode({ data }) {
 
           <div className="image-card__attributes graph-node__actions-panel">
             <div className="image-card__edit-actions">
-              <button className="image-card__edit-action-btn nodrag" onClick={() => data.onToggleAction?.(data.id, data.nodeKind)} disabled={isProcessing}>
-                <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>play_arrow</span>
-                Action
-              </button>
-              {canFetchAsyncResult && (
-                <button className="image-card__edit-action-btn nodrag" onClick={() => data.onGetAsyncMeshResult?.(data.id)}>
-                  <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>refresh</span>
-                  GET RESULT
+              <div className="graph-node__primary-actions">
+                <button className="image-card__edit-action-btn nodrag" onClick={() => data.onToggleAction?.(data.id, data.nodeKind)} disabled={isProcessing}>
+                  <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>play_arrow</span>
+                  Action
                 </button>
-              )}
-              {meshEditorPath && (
-                <button className="image-card__edit-action-btn nodrag" onClick={() => navigate(meshEditorPath)}>
-                  <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>edit_square</span>
-                  Edit
-                </button>
-              )}
-              {imageEditorPath && (
-                <button className="image-card__edit-action-btn nodrag" onClick={() => navigate(imageEditorPath)}>
-                  <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>edit_square</span>
-                  Edit
-                </button>
-              )}
+                {canFetchAsyncResult && (
+                  <button className="image-card__edit-action-btn nodrag" onClick={() => data.onGetAsyncMeshResult?.(data.id)}>
+                    <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>refresh</span>
+                    GET RESULT
+                  </button>
+                )}
+                {meshEditorPath && (
+                  <button className="image-card__edit-action-btn graph-node__edit-action nodrag" onClick={() => navigate(meshEditorPath)}>
+                    <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>edit_square</span>
+                    Edit
+                  </button>
+                )}
+                {imageEditorPath && (
+                  <button className="image-card__edit-action-btn graph-node__edit-action nodrag" onClick={() => navigate(imageEditorPath)}>
+                    <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>edit_square</span>
+                    Edit
+                  </button>
+                )}
+              </div>
 
               {draft?.mode === 'select' && (
                 <div className="image-card__edit-action-menu">
@@ -2163,6 +2165,15 @@ export default function GraphPage({ project }) {
     })
   }, [addNotification])
 
+  const pushExternalApiFailureNotification = useCallback((title, message, source = 'External API') => {
+    addNotification({
+      title,
+      message: message || 'External API request failed',
+      source,
+      tone: 'error'
+    })
+  }, [addNotification])
+
   const customApis = useMemo(() => settings?.apis?.custom || [], [settings])
   const imageGenerationApis = useMemo(() => ([
     ...IMAGE_API_LIST,
@@ -3144,6 +3155,11 @@ export default function GraphPage({ project }) {
               setActionDraftsByNodeId({})
             } catch (err) {
               await setProcessingState('error', null, { error: err.message || 'Image generation failed' })
+              pushExternalApiFailureNotification(
+                'Image generation failed',
+                err.message || 'Image generation failed',
+                imageGenerationApis.find(api => api.id === targetDraft.selectedApi)?.name || 'Image generation API'
+              )
             }
             return
           }
@@ -3282,6 +3298,11 @@ export default function GraphPage({ project }) {
               setActionDraftsByNodeId({})
             } catch (err) {
               await setProcessingState('error', null, { error: err.message || 'Image edit failed', inputSource: sourceReference })
+              pushExternalApiFailureNotification(
+                'Image edit failed',
+                err.message || 'Image edit failed',
+                imageEditApis.find(api => api.id === targetDraft.selectedApi)?.name || 'Image edit API'
+              )
             }
             return
           }
@@ -3800,6 +3821,11 @@ export default function GraphPage({ project }) {
             setActionDraftsByNodeId({})
           } catch (err) {
             await setProcessingState('error', null, { error: err.message || 'Image edit failed', inputSource: sourceReference })
+            pushExternalApiFailureNotification(
+              'Image edit failed',
+              err.message || 'Image edit failed',
+              imageEditApis.find(api => api.id === targetDraft.selectedApi)?.name || 'Image edit API'
+            )
           }
           return
         }
@@ -4084,7 +4110,7 @@ export default function GraphPage({ project }) {
       },
       onCloseAction: () => setActionDraftsByNodeId({})
     }
-  })}), [actionDraftsByNodeId, attachExistingAsset, closeNodeProgressSubscription, comfyLoading, createImageEditNodeDraft, createImageNodeDraft, createMeshGenNodeDraft, createProjectConnection, edges, ensureComfyWorkflowsLoaded, ensureGeneratedMeshThumbnails, ensureLibraryLoaded, generateImage, getConnectedInputAssetFrom, handleCreateNode, handleNodeNameChange, handleNodeNameCommit, handleNodeOutputValueChange, handleNodeOutputValueCommit, handleOpenAssetSelector, imageEditApis, imageEditWorkflows, imageGenerationApis, imageGenerationWorkflows, libraryImageOptions, libraryLoading, libraryMeshOptions, meshGenerationApis, meshGenerationWorkflows, nodes, openActionDraft, project.id, pushMeshGenerationFailureNotification, queryTencentMeshGenerationResult, queryTripoMeshGenerationResult, replaceFlowNodeData, runComfyWorkflow, runImageEditApi, runImageEditComfy, runMeshGenerationApi, setEdges, setNodeTransientData, setNodes, subscribeToComfyWorkflowProgress, updateProjectNode])
+  })}), [actionDraftsByNodeId, attachExistingAsset, closeNodeProgressSubscription, comfyLoading, createImageEditNodeDraft, createImageNodeDraft, createMeshGenNodeDraft, createProjectConnection, edges, ensureComfyWorkflowsLoaded, ensureGeneratedMeshThumbnails, ensureLibraryLoaded, generateImage, getConnectedInputAssetFrom, handleCreateNode, handleNodeNameChange, handleNodeNameCommit, handleNodeOutputValueChange, handleNodeOutputValueCommit, handleOpenAssetSelector, imageEditApis, imageEditWorkflows, imageGenerationApis, imageGenerationWorkflows, libraryImageOptions, libraryLoading, libraryMeshOptions, meshGenerationApis, meshGenerationWorkflows, nodes, openActionDraft, project.id, pushExternalApiFailureNotification, pushMeshGenerationFailureNotification, queryTencentMeshGenerationResult, queryTripoMeshGenerationResult, replaceFlowNodeData, runComfyWorkflow, runImageEditApi, runImageEditComfy, runMeshGenerationApi, setEdges, setNodeTransientData, setNodes, subscribeToComfyWorkflowProgress, updateProjectNode])
 
   const handleFileUpload = useCallback(async (event) => {
     const file = event.target.files?.[0]

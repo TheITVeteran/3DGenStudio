@@ -5,6 +5,7 @@ import Footer from '../components/Footer'
 import SettingsModal from '../components/SettingsModal'
 import AssetSelectorModal from '../components/AssetSelectorModal'
 import { useProjects } from '../context/ProjectContext'
+import { useNotifications } from '../context/NotificationContext'
 import { buildAssetUrl, createExecutionId } from '../utils/meshTexturing'
 import './ImageEditorPage.css'
 
@@ -285,6 +286,7 @@ export default function ImageEditorPage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const { getComfyWorkflows, runComfyWorkflow, subscribeToComfyWorkflowProgress, saveImageEditorFile } = useProjects()
+  const { addNotification } = useNotifications()
 
   const [showSettings, setShowSettings] = useState(false)
   const [feedback, setFeedback] = useState('')
@@ -577,7 +579,41 @@ export default function ImageEditorPage() {
         context.restore()
       }
     }
-  }, [adjustPreviewDirty, adjustValues, filterPreviewDirty, filterValues, getPreviewTargetLayerId, layers, toolGroup, toolId])
+
+    if (toolGroup === 'edit' && toolId === 'crop') {
+      const x = Math.round(clamp(cropValues.x, 0, Math.max(0, displayCanvas.width - 1)))
+      const y = Math.round(clamp(cropValues.y, 0, Math.max(0, displayCanvas.height - 1)))
+      const maxWidth = Math.max(1, displayCanvas.width - x)
+      const maxHeight = Math.max(1, displayCanvas.height - y)
+      const width = Math.round(clamp(cropValues.width, 1, maxWidth))
+      const height = Math.round(clamp(cropValues.height, 1, maxHeight))
+
+      context.save()
+      const overlayCanvas = document.createElement('canvas')
+      overlayCanvas.width = displayCanvas.width
+      overlayCanvas.height = displayCanvas.height
+      const overlayContext = overlayCanvas.getContext('2d')
+      overlayContext.fillStyle = 'rgba(0, 0, 0, 0.35)'
+      overlayContext.fillRect(0, 0, overlayCanvas.width, overlayCanvas.height)
+      overlayContext.globalCompositeOperation = 'destination-out'
+      overlayContext.fillRect(x, y, width, height)
+      overlayContext.globalCompositeOperation = 'source-over'
+      context.drawImage(overlayCanvas, 0, 0)
+
+      context.strokeStyle = '#8ff5ff'
+      context.lineWidth = 2
+      context.setLineDash([10, 6])
+      context.strokeRect(x + 0.5, y + 0.5, Math.max(0, width - 1), Math.max(0, height - 1))
+
+      context.fillStyle = 'rgba(10, 16, 26, 0.78)'
+      context.fillRect(x, Math.max(0, y - 24), 168, 22)
+      context.fillStyle = '#e9f7ff'
+      context.font = '12px "Inter", sans-serif'
+      context.textBaseline = 'middle'
+      context.fillText(`X:${x}  Y:${y}  W:${width}  H:${height}`, x + 8, Math.max(0, y - 13))
+      context.restore()
+    }
+  }, [adjustPreviewDirty, adjustValues, cropValues.height, cropValues.width, cropValues.x, cropValues.y, filterPreviewDirty, filterValues, getPreviewTargetLayerId, layers, toolGroup, toolId])
 
   const bumpRender = useCallback(() => {
     setRenderRevision(prev => prev + 1)
@@ -1067,6 +1103,84 @@ export default function ImageEditorPage() {
     bumpRender()
   }, [bumpMask, bumpRender, createEmptyCanvas, cropValues, layers, pushUndoSnapshot])
 
+  const cropLimits = useMemo(() => {
+    const baseCanvas = layerCanvasesRef.current.get(layers[0]?.id)
+    const canvasWidth = Math.max(1, baseCanvas?.width || 1)
+    const canvasHeight = Math.max(1, baseCanvas?.height || 1)
+
+    const xMax = Math.max(0, canvasWidth - 1)
+    const yMax = Math.max(0, canvasHeight - 1)
+    const x = Math.round(clamp(cropValues.x, 0, xMax))
+    const y = Math.round(clamp(cropValues.y, 0, yMax))
+
+    return {
+      xMin: 0,
+      xMax,
+      yMin: 0,
+      yMax,
+      widthMin: 1,
+      widthMax: Math.max(1, canvasWidth - x),
+      heightMin: 1,
+      heightMax: Math.max(1, canvasHeight - y)
+    }
+  }, [cropValues.x, cropValues.y, layers])
+
+  const handleCropXChange = useCallback((value) => {
+    const numeric = Number(value)
+    setCropValues(prev => {
+      const baseCanvas = layerCanvasesRef.current.get(layers[0]?.id)
+      const canvasWidth = Math.max(1, baseCanvas?.width || 1)
+      const x = Math.round(clamp(Number.isFinite(numeric) ? numeric : 0, 0, canvasWidth - 1))
+      const maxWidth = Math.max(1, canvasWidth - x)
+      return {
+        ...prev,
+        x,
+        width: Math.round(clamp(prev.width, 1, maxWidth))
+      }
+    })
+  }, [layers])
+
+  const handleCropYChange = useCallback((value) => {
+    const numeric = Number(value)
+    setCropValues(prev => {
+      const baseCanvas = layerCanvasesRef.current.get(layers[0]?.id)
+      const canvasHeight = Math.max(1, baseCanvas?.height || 1)
+      const y = Math.round(clamp(Number.isFinite(numeric) ? numeric : 0, 0, canvasHeight - 1))
+      const maxHeight = Math.max(1, canvasHeight - y)
+      return {
+        ...prev,
+        y,
+        height: Math.round(clamp(prev.height, 1, maxHeight))
+      }
+    })
+  }, [layers])
+
+  const handleCropWidthChange = useCallback((value) => {
+    const numeric = Number(value)
+    setCropValues(prev => {
+      const baseCanvas = layerCanvasesRef.current.get(layers[0]?.id)
+      const canvasWidth = Math.max(1, baseCanvas?.width || 1)
+      const maxWidth = Math.max(1, canvasWidth - Math.round(clamp(prev.x, 0, canvasWidth - 1)))
+      return {
+        ...prev,
+        width: Math.round(clamp(Number.isFinite(numeric) ? numeric : 1, 1, maxWidth))
+      }
+    })
+  }, [layers])
+
+  const handleCropHeightChange = useCallback((value) => {
+    const numeric = Number(value)
+    setCropValues(prev => {
+      const baseCanvas = layerCanvasesRef.current.get(layers[0]?.id)
+      const canvasHeight = Math.max(1, baseCanvas?.height || 1)
+      const maxHeight = Math.max(1, canvasHeight - Math.round(clamp(prev.y, 0, canvasHeight - 1)))
+      return {
+        ...prev,
+        height: Math.round(clamp(Number.isFinite(numeric) ? numeric : 1, 1, maxHeight))
+      }
+    })
+  }, [layers])
+
   const handleApplyResize = useCallback(() => {
     pushUndoSnapshot()
     const baseCanvas = layerCanvasesRef.current.get(layers[0]?.id)
@@ -1314,12 +1428,19 @@ export default function ImageEditorPage() {
       setFeedback('AI result applied to the masked region.')
       bumpRender()
     } catch (err) {
-      setFeedback(err.message || 'ComfyUI execution failed.')
+      const failureMessage = err.message || 'ComfyUI execution failed.'
+      setFeedback(failureMessage)
+      addNotification({
+        title: 'Image edit failed',
+        message: failureMessage,
+        source: 'ComfyUI',
+        tone: 'error'
+      })
     } finally {
       stopProgress()
       setAiRunning(false)
     }
-  }, [bumpRender, createEmptyCanvas, exportCurrentComposite, imageName, imageParamSources, layers, loadAssetAsFile, maskHasPixels, projectId, pushUndoSnapshot, runComfyWorkflow, selectedWorkflow, subscribeToComfyWorkflowProgress, workflowValues])
+  }, [addNotification, bumpRender, createEmptyCanvas, exportCurrentComposite, imageName, imageParamSources, layers, loadAssetAsFile, maskHasPixels, projectId, pushUndoSnapshot, runComfyWorkflow, selectedWorkflow, subscribeToComfyWorkflowProgress, workflowValues])
 
   const handleSaveImage = useCallback(async () => {
     if (!numericAssetId) return
@@ -1641,7 +1762,19 @@ export default function ImageEditorPage() {
               className="image-editor-input"
               type="number"
               value={cropValues.x}
-              onChange={event => setCropValues(prev => ({ ...prev, x: Number(event.target.value) }))}
+              min={cropLimits.xMin}
+              max={cropLimits.xMax}
+              step="1"
+              onChange={event => handleCropXChange(event.target.value)}
+            />
+            <input
+              className="image-editor-input"
+              type="range"
+              min={cropLimits.xMin}
+              max={cropLimits.xMax}
+              step="1"
+              value={cropValues.x}
+              onChange={event => handleCropXChange(event.target.value)}
             />
           </label>
           <label className="image-editor-label">
@@ -1650,7 +1783,19 @@ export default function ImageEditorPage() {
               className="image-editor-input"
               type="number"
               value={cropValues.y}
-              onChange={event => setCropValues(prev => ({ ...prev, y: Number(event.target.value) }))}
+              min={cropLimits.yMin}
+              max={cropLimits.yMax}
+              step="1"
+              onChange={event => handleCropYChange(event.target.value)}
+            />
+            <input
+              className="image-editor-input"
+              type="range"
+              min={cropLimits.yMin}
+              max={cropLimits.yMax}
+              step="1"
+              value={cropValues.y}
+              onChange={event => handleCropYChange(event.target.value)}
             />
           </label>
           <label className="image-editor-label">
@@ -1659,7 +1804,19 @@ export default function ImageEditorPage() {
               className="image-editor-input"
               type="number"
               value={cropValues.width}
-              onChange={event => setCropValues(prev => ({ ...prev, width: Number(event.target.value) }))}
+              min={cropLimits.widthMin}
+              max={cropLimits.widthMax}
+              step="1"
+              onChange={event => handleCropWidthChange(event.target.value)}
+            />
+            <input
+              className="image-editor-input"
+              type="range"
+              min={cropLimits.widthMin}
+              max={cropLimits.widthMax}
+              step="1"
+              value={cropValues.width}
+              onChange={event => handleCropWidthChange(event.target.value)}
             />
           </label>
           <label className="image-editor-label">
@@ -1668,7 +1825,19 @@ export default function ImageEditorPage() {
               className="image-editor-input"
               type="number"
               value={cropValues.height}
-              onChange={event => setCropValues(prev => ({ ...prev, height: Number(event.target.value) }))}
+              min={cropLimits.heightMin}
+              max={cropLimits.heightMax}
+              step="1"
+              onChange={event => handleCropHeightChange(event.target.value)}
+            />
+            <input
+              className="image-editor-input"
+              type="range"
+              min={cropLimits.heightMin}
+              max={cropLimits.heightMax}
+              step="1"
+              value={cropValues.height}
+              onChange={event => handleCropHeightChange(event.target.value)}
             />
           </label>
           <button type="button" className="image-editor-btn image-editor-btn--primary" onClick={handleApplyCrop}>
