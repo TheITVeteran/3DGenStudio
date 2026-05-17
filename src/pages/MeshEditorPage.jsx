@@ -1270,13 +1270,171 @@ function createProjectionCropMaskCanvasFromPatch(patchCanvas, cropBorder = 0) {
   const outData = out.data
   const pixelCount = width * height
   const mask = new Uint8Array(pixelCount)
+  let alphaCoverage = 0
 
   for (let i = 0; i < pixelCount; i += 1) {
-    // Keep only the projected silhouette from patch alpha.
-    mask[i] = patchData[i * 4 + 3] > 8 ? 1 : 0
+    alphaCoverage += patchData[i * 4 + 3]
+  }
+
+  let borderCount = 0
+  let borderMaxSum = 0
+  let borderMinSum = 0
+  const sampleBorderPixel = (x, y) => {
+    const idx = (y * width + x) * 4
+    const r = patchData[idx]
+    const g = patchData[idx + 1]
+    const b = patchData[idx + 2]
+    borderMaxSum += Math.max(r, g, b)
+    borderMinSum += Math.min(r, g, b)
+    borderCount += 1
+  }
+
+  for (let x = 0; x < width; x += 1) {
+    sampleBorderPixel(x, 0)
+    if (height > 1) {
+      sampleBorderPixel(x, height - 1)
+    }
+  }
+  for (let y = 1; y + 1 < height; y += 1) {
+    sampleBorderPixel(0, y)
+    if (width > 1) {
+      sampleBorderPixel(width - 1, y)
+    }
+  }
+
+  const borderMeanMax = borderCount > 0 ? borderMaxSum / borderCount : 0
+  const borderMeanMin = borderCount > 0 ? borderMinSum / borderCount : 0
+  const darkMatteLikely = borderMeanMax <= 80 && borderMeanMin <= 52
+
+  // If the generated view has a useful alpha channel, use it directly.
+  // Otherwise remove black matte background by flood-filling from borders.
+  const alphaIsMeaningful = alphaCoverage > pixelCount * 20
+  if (alphaIsMeaningful) {
+    for (let i = 0; i < pixelCount; i += 1) {
+      // Use a slightly stricter alpha gate to suppress fringe antialiasing.
+      mask[i] = patchData[i * 4 + 3] > 20 ? 1 : 0
+    }
+  } else {
+    const darkThreshold = Math.max(18, Math.min(64, Math.round(borderMeanMax + 16)))
+    const queue = new Int32Array(pixelCount)
+    const isBackground = new Uint8Array(pixelCount)
+    let queueHead = 0
+    let queueTail = 0
+
+    const isDarkMattePixel = (index) => {
+      const idx = index * 4
+      const r = patchData[idx]
+      const g = patchData[idx + 1]
+      const b = patchData[idx + 2]
+      const max = Math.max(r, g, b)
+      const min = Math.min(r, g, b)
+      return max <= darkThreshold && (max - min) <= 24
+    }
+
+    const trySeed = (x, y) => {
+      const i = y * width + x
+      if (isBackground[i] || !isDarkMattePixel(i)) {
+        return
+      }
+      isBackground[i] = 1
+      queue[queueTail] = i
+      queueTail += 1
+    }
+
+    for (let x = 0; x < width; x += 1) {
+      trySeed(x, 0)
+      if (height > 1) {
+        trySeed(x, height - 1)
+      }
+    }
+    for (let y = 1; y + 1 < height; y += 1) {
+      trySeed(0, y)
+      if (width > 1) {
+        trySeed(width - 1, y)
+      }
+    }
+
+    while (queueHead < queueTail) {
+      const current = queue[queueHead]
+      queueHead += 1
+      const x = current % width
+      const y = Math.floor(current / width)
+
+      const visit = (nx, ny) => {
+        if (nx < 0 || ny < 0 || nx >= width || ny >= height) {
+          return
+        }
+        const ni = ny * width + nx
+        if (isBackground[ni] || !isDarkMattePixel(ni)) {
+          return
+        }
+        isBackground[ni] = 1
+        queue[queueTail] = ni
+        queueTail += 1
+      }
+
+      visit(x - 1, y)
+      visit(x + 1, y)
+      visit(x, y - 1)
+      visit(x, y + 1)
+    }
+
+    for (let i = 0; i < pixelCount; i += 1) {
+      mask[i] = isBackground[i] ? 0 : 1
+    }
   }
 
   let borderPx = Math.max(0, Math.floor(cropBorder || 0))
+
+  // If the generated image appears matted against a dark background,
+  // remove dark low-chroma pixels only on the silhouette ring.
+  if (darkMatteLikely) {
+    const removed = new Uint8Array(pixelCount)
+    const maxThreshold = Math.max(24, Math.min(96, Math.round(borderMeanMax + 26)))
+    const chromaThreshold = 28
+
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const i = y * width + x
+        if (!mask[i]) {
+          continue
+        }
+
+        let touchesOutside = false
+        if (x === 0 || !mask[i - 1]) touchesOutside = true
+        if (!touchesOutside && x + 1 >= width) touchesOutside = true
+        if (!touchesOutside && x + 1 < width && !mask[i + 1]) touchesOutside = true
+        if (!touchesOutside && (y === 0 || !mask[i - width])) touchesOutside = true
+        if (!touchesOutside && y + 1 >= height) touchesOutside = true
+        if (!touchesOutside && y + 1 < height && !mask[i + width]) touchesOutside = true
+
+        if (!touchesOutside) {
+          continue
+        }
+
+        const idx = i * 4
+        const r = patchData[idx]
+        const g = patchData[idx + 1]
+        const b = patchData[idx + 2]
+        const max = Math.max(r, g, b)
+        const min = Math.min(r, g, b)
+        if (max <= maxThreshold && (max - min) <= chromaThreshold) {
+          removed[i] = 1
+        }
+      }
+    }
+
+    for (let i = 0; i < pixelCount; i += 1) {
+      if (removed[i]) {
+        mask[i] = 0
+      }
+    }
+
+    // Add a tiny automatic erosion in dark-matte cases so users do not need
+    // to bump crop border manually for common black fringe artifacts.
+    borderPx = Math.max(borderPx, 1)
+  }
+
   if (borderPx > 0) {
     // Erode along the alpha silhouette border (not square bounds) using a
     // chamfer distance transform from transparent -> opaque pixels.
@@ -1444,6 +1602,7 @@ export default function MeshEditorPage() {
   const patchedTextureRef = useRef(null)
   const projectionViewDataRef = useRef([])
   const projectionCoverageRef = useRef(null)
+  const projectionFaceOwnershipRef = useRef(new Map())
   const projectionLayerDataRef = useRef(new Map())
   const projectionLayerCounterRef = useRef(0)
   const projectionRebuildTokenRef = useRef(0)
@@ -4548,6 +4707,7 @@ export default function MeshEditorPage() {
   useEffect(() => {
     setProjectionStarted(false)
     projectionCoverageRef.current = null
+    projectionFaceOwnershipRef.current.clear()
     projectionLayerDataRef.current.clear()
     projectionLayerCounterRef.current = 0
     setProjectionLayers([])
@@ -4562,6 +4722,7 @@ export default function MeshEditorPage() {
     const texW = textureCanvas.width
     const texH = textureCanvas.height
     const coverageMap = new Uint8Array(texW * texH)
+    const faceOwnershipMap = new Map()
     const rebuildToken = ++projectionRebuildTokenRef.current
 
     setProjectionRebuilding(true)
@@ -4599,6 +4760,7 @@ export default function MeshEditorPage() {
         const maskCanvas = createProjectionCropMaskCanvasFromPatch(patchCanvas, layer.cropBorder || 0)
         const accumulatedColor = new Float32Array(texW * texH * 4)
         const accumulatedWeight = new Float32Array(texW * texH)
+        const previousCoverageMap = new Uint8Array(coverageMap)
 
         await accumulateProjectedPatch({
           root: texturableMesh.root,
@@ -4620,6 +4782,14 @@ export default function MeshEditorPage() {
           grazingCoverageThreshold: 0.15,
           minFacingCos: 0.3,
           facingPower: 2.2,
+          minMaskAlpha: 0.12,
+          unmatteFringe: true,
+          unmatteStrength: 0.92,
+          layerId: layer.id,
+          faceOwnershipMap,
+          faceLockPolicy: 'quality-aware',
+          faceLockCoverageThreshold: 0.85,
+          faceLockFacingThreshold: 0.62,
           onProgress: progress => {
             const overall = (layerIndex + progress) / Math.max(1, visibleLayers.length)
             setProjectionRebuildProgress(overall)
@@ -4637,7 +4807,10 @@ export default function MeshEditorPage() {
           textureCanvas,
           accumulatedColor,
           accumulatedWeight,
-          gapFillRadius: Math.max(2, Math.round((layer.blendPixels || 0) / 2))
+          gapFillRadius: Math.max(2, Math.round((layer.blendPixels || 0) / 2)),
+          previousCoverageMap,
+          boundaryBlendPixels: layer.blendPixels || 0,
+          boundaryOnlyBlend: true
         })
       }
 
@@ -4646,6 +4819,7 @@ export default function MeshEditorPage() {
       }
 
       projectionCoverageRef.current = coverageMap
+  projectionFaceOwnershipRef.current = faceOwnershipMap
       updateCanvasTexture(displayTextureRef.current)
       setTextureRevision(current => current + 1)
       if (announce) {
@@ -4744,6 +4918,7 @@ export default function MeshEditorPage() {
     }
 
     projectionCoverageRef.current = new Uint8Array(clampedSize * clampedSize)
+    projectionFaceOwnershipRef.current.clear()
     projectionLayerDataRef.current.clear()
     projectionLayerCounterRef.current = 0
     setProjectionLayers([])

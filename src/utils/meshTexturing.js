@@ -1014,6 +1014,57 @@ function waitForNextFrame() {
   })
 }
 
+function estimatePatchMatteColor(patchData, maskData, width, height) {
+  if (!patchData || !maskData || !width || !height) {
+    return { r: 0, g: 0, b: 0 }
+  }
+
+  let sumR = 0
+  let sumG = 0
+  let sumB = 0
+  let count = 0
+
+  const sample = (x, y) => {
+    const i = y * width + x
+    const idx = i * 4
+    const maskA = maskData[idx + 3] / 255
+
+    // Prefer near-outside pixels for matte estimation.
+    if (maskA > 0.08) {
+      return
+    }
+
+    sumR += patchData[idx]
+    sumG += patchData[idx + 1]
+    sumB += patchData[idx + 2]
+    count += 1
+  }
+
+  for (let x = 0; x < width; x += 1) {
+    sample(x, 0)
+    if (height > 1) {
+      sample(x, height - 1)
+    }
+  }
+
+  for (let y = 1; y + 1 < height; y += 1) {
+    sample(0, y)
+    if (width > 1) {
+      sample(width - 1, y)
+    }
+  }
+
+  if (count <= 0) {
+    return { r: 0, g: 0, b: 0 }
+  }
+
+  return {
+    r: sumR / count,
+    g: sumG / count,
+    b: sumB / count
+  }
+}
+
 function buildCoverageBlendWeights(coverageMap, textureWidth, textureHeight, blendPixels = 0) {
   const pixelCount = textureWidth * textureHeight
   if (!coverageMap || coverageMap.length !== pixelCount) {
@@ -1379,7 +1430,15 @@ export async function accumulateProjectedPatch({
   markCoverage = false,
   grazingCoverageThreshold = 0.15,
   minFacingCos = 0,
-  facingPower = 1.5
+  facingPower = 1.5,
+  minMaskAlpha = 0.01,
+  unmatteFringe = false,
+  unmatteStrength = 1,
+  layerId = '',
+  faceOwnershipMap = null,
+  faceLockPolicy = 'none',
+  faceLockCoverageThreshold = 0.7,
+  faceLockFacingThreshold = 0.45
 }) {
   if (!root || !camera || !maskCanvas || !bbox || !patchImage || !accumulatedColor || !accumulatedWeight) {
     return { processedSamples: 0, appliedSamples: 0, activePixelCount: 0 }
@@ -1425,6 +1484,11 @@ export async function accumulateProjectedPatch({
 
   const { data: patchData } = patchContext.getImageData(0, 0, bbox.width, bbox.height)
   const { data: maskData } = maskPatchCanvas.getContext('2d').getImageData(0, 0, bbox.width, bbox.height)
+  const matteColor = unmatteFringe
+    ? estimatePatchMatteColor(patchData, maskData, bbox.width, bbox.height)
+    : null
+  const clampedUnmatteStrength = Math.max(0, Math.min(1, Number(unmatteStrength) || 0))
+  const clampedMinMaskAlpha = Math.max(0, Math.min(1, Number(minMaskAlpha) || 0))
 
   const raycaster = new THREE.Raycaster()
   raycaster.firstHitOnly = true
@@ -1451,6 +1515,7 @@ export async function accumulateProjectedPatch({
 
   let processedSamples = 0
   let appliedSamples = 0
+  let lockedFaces = 0
   let lastProgressAt = startedAt
 
   {
@@ -1474,6 +1539,8 @@ export async function accumulateProjectedPatch({
     const triCenter = new THREE.Vector3()
     const projTmp = new THREE.Vector3()
     const uvAv = new THREE.Vector2(), uvBv = new THREE.Vector2(), uvCv = new THREE.Vector2()
+    const lockPolicy = String(faceLockPolicy || 'none').toLowerCase()
+    const ownershipEnabled = faceOwnershipMap instanceof Map
 
     let totalTriCount = 0
     for (const mesh of projectableMeshes) {
@@ -1497,6 +1564,23 @@ export async function accumulateProjectedPatch({
         const i0 = indexAttr ? indexAttr.getX(base) : base
         const i1 = indexAttr ? indexAttr.getX(base + 1) : base + 1
         const i2 = indexAttr ? indexAttr.getX(base + 2) : base + 2
+        const faceKey = `${mesh.uuid}:${tri}`
+
+        if (ownershipEnabled && lockPolicy !== 'none') {
+          const previousOwnership = faceOwnershipMap.get(faceKey)
+          if (previousOwnership && previousOwnership.layerId !== layerId) {
+            const previousCoverage = Number(previousOwnership.coverage) || 0
+            const previousFacing = Number(previousOwnership.facingCos) || 0
+            const isStrongFace = previousCoverage >= faceLockCoverageThreshold && previousFacing >= faceLockFacingThreshold
+
+            if (lockPolicy === 'strict' || (lockPolicy === 'quality-aware' && isStrongFace)) {
+              lockedFaces += 1
+              processedSamples += 1
+              trisDone += 1
+              continue
+            }
+          }
+        }
 
         vA.fromBufferAttribute(posAttr, i0).applyMatrix4(matrixWorld)
         vB.fromBufferAttribute(posAttr, i1).applyMatrix4(matrixWorld)
@@ -1578,6 +1662,9 @@ export async function accumulateProjectedPatch({
 
         // Slight inflation to avoid seams between adjacent triangles
         const baryEps = -1e-4
+        let faceCoveredTexels = 0
+        let faceAcceptedTexels = 0
+        let faceAccumulatedWeight = 0
 
         for (let py = minPy; py <= maxPy; py += 1) {
           for (let px = minPx; px <= maxPx; px += 1) {
@@ -1589,6 +1676,8 @@ export async function accumulateProjectedPatch({
             if (w0 < baryEps || w1 < baryEps || w2 < baryEps) {
               continue
             }
+
+            faceCoveredTexels += 1
 
             const pixelIdx = py * textureWidth + px
             const isPreviouslyCovered = Boolean(coverageMap && coverageMap[pixelIdx] > 0)
@@ -1658,6 +1747,8 @@ export async function accumulateProjectedPatch({
               accumulatedColor[idx + 2] = patchData[nearestIdx + 2] * weight
               accumulatedColor[idx + 3] = patchData[nearestIdx + 3] * weight
               accumulatedWeight[pixelIdx] = Math.max(accumulatedWeight[pixelIdx], weight)
+              faceAcceptedTexels += 1
+              faceAccumulatedWeight += weight
             } else {
               // Bilinear sample of patch + mask at the projected screen point
               const fxLocal = sxF - bbox.x - 0.5
@@ -1692,8 +1783,26 @@ export async function accumulateProjectedPatch({
                 + maskData[i11 + 3] * w11
               ) / 255
 
-              if (maskAlpha <= 0.01 || sampleAlphaNorm <= 0.02) {
+              if (maskAlpha <= clampedMinMaskAlpha || sampleAlphaNorm <= 0.02) {
                 continue
+              }
+
+              let correctedR = sampleR
+              let correctedG = sampleG
+              let correctedB = sampleB
+
+              if (matteColor && maskAlpha < 0.995 && clampedUnmatteStrength > 0) {
+                const safeAlpha = Math.max(0.08, maskAlpha)
+                const edgeFactor = Math.max(0, Math.min(1, (1 - maskAlpha) / 0.75))
+                const blendFactor = edgeFactor * clampedUnmatteStrength
+
+                const unmatteR = Math.max(0, Math.min(255, (sampleR - matteColor.r * (1 - maskAlpha)) / safeAlpha))
+                const unmatteG = Math.max(0, Math.min(255, (sampleG - matteColor.g * (1 - maskAlpha)) / safeAlpha))
+                const unmatteB = Math.max(0, Math.min(255, (sampleB - matteColor.b * (1 - maskAlpha)) / safeAlpha))
+
+                correctedR = sampleR + (unmatteR - sampleR) * blendFactor
+                correctedG = sampleG + (unmatteG - sampleG) * blendFactor
+                correctedB = sampleB + (unmatteB - sampleB) * blendFactor
               }
 
               const angleWeight = isPreviouslyCovered ? facingWeight : 1
@@ -1701,11 +1810,13 @@ export async function accumulateProjectedPatch({
               if (weight <= 0.0025) {
                 continue
               }
-              accumulatedColor[idx]     += sampleR * weight
-              accumulatedColor[idx + 1] += sampleG * weight
-              accumulatedColor[idx + 2] += sampleB * weight
+              accumulatedColor[idx]     += correctedR * weight
+              accumulatedColor[idx + 1] += correctedG * weight
+              accumulatedColor[idx + 2] += correctedB * weight
               accumulatedColor[idx + 3] += sampleA * weight
               accumulatedWeight[pixelIdx] += weight
+              faceAcceptedTexels += 1
+              faceAccumulatedWeight += weight
             }
 
             if (touchedCoverage && !touchedCoverage[pixelIdx] && !isGrazingTriangle) {
@@ -1713,6 +1824,35 @@ export async function accumulateProjectedPatch({
               touchedCoverageIndices.push(pixelIdx)
             }
             appliedSamples += 1
+          }
+        }
+
+        if (ownershipEnabled && faceAcceptedTexels > 0) {
+          const coverageRatio = faceCoveredTexels > 0
+            ? Math.min(1, faceAcceptedTexels / faceCoveredTexels)
+            : 0
+          const nextOwnership = {
+            layerId,
+            coverage: coverageRatio,
+            facingCos,
+            weight: faceAccumulatedWeight,
+            score: coverageRatio * facingCos
+          }
+          const previousOwnership = faceOwnershipMap.get(faceKey)
+
+          if (!previousOwnership || previousOwnership.layerId === layerId) {
+            faceOwnershipMap.set(faceKey, nextOwnership)
+          } else {
+            const previousScore = Number(previousOwnership.score)
+              || ((Number(previousOwnership.coverage) || 0) * (Number(previousOwnership.facingCos) || 0))
+            const nextScore = nextOwnership.score
+            const previousCoverage = Number(previousOwnership.coverage) || 0
+            const previousFacing = Number(previousOwnership.facingCos) || 0
+            const previousStrong = previousCoverage >= faceLockCoverageThreshold && previousFacing >= faceLockFacingThreshold
+
+            if (!previousStrong || nextScore > previousScore + 1e-4) {
+              faceOwnershipMap.set(faceKey, nextOwnership)
+            }
           }
         }
 
@@ -1745,7 +1885,8 @@ export async function accumulateProjectedPatch({
       activePixelCount,
       processedSamples,
       appliedSamples,
-      coveredPixels: touchedCoverageIndices?.length || 0
+      coveredPixels: touchedCoverageIndices?.length || 0,
+      lockedFaces
     }
   }
 }
@@ -1758,12 +1899,18 @@ export function finalizeProjectedPatch({
   textureCanvas,
   accumulatedColor,
   accumulatedWeight,
-  gapFillRadius = 0
+  gapFillRadius = 0,
+  previousCoverageMap = null,
+  boundaryBlendPixels = 0,
+  boundaryOnlyBlend = false
 }) {
   const textureWidth = textureCanvas.width
   const textureHeight = textureCanvas.height
   const textureContext = textureCanvas.getContext('2d')
   const textureImageData = textureContext.getImageData(0, 0, textureWidth, textureHeight)
+  const boundaryBlendWeights = boundaryOnlyBlend
+    ? buildCoverageBlendWeights(previousCoverageMap, textureWidth, textureHeight, boundaryBlendPixels)
+    : null
   let appliedPixels = 0
 
   for (let pixelIndex = 0; pixelIndex < accumulatedWeight.length; pixelIndex += 1) {
@@ -1774,7 +1921,20 @@ export function finalizeProjectedPatch({
     }
 
     const colorIndex = pixelIndex * 4
-    const blend = Math.min(1, weight)
+    const wasPreviouslyCovered = Boolean(previousCoverageMap && previousCoverageMap[pixelIndex] > 0)
+    let blend = Math.min(1, weight)
+
+    if (boundaryOnlyBlend && wasPreviouslyCovered) {
+      const boundaryWeight = boundaryBlendWeights ? boundaryBlendWeights[pixelIndex] : 0
+      if (boundaryWeight <= 1e-6) {
+        continue
+      }
+      blend *= boundaryWeight
+    }
+
+    if (blend <= 1e-6) {
+      continue
+    }
 
     textureImageData.data[colorIndex]     = Math.round(textureImageData.data[colorIndex]     * (1 - blend) + (accumulatedColor[colorIndex]     / weight) * blend)
     textureImageData.data[colorIndex + 1] = Math.round(textureImageData.data[colorIndex + 1] * (1 - blend) + (accumulatedColor[colorIndex + 1] / weight) * blend)
@@ -1788,6 +1948,10 @@ export function finalizeProjectedPatch({
     const sourceData = new Uint8ClampedArray(textureImageData.data)
 
     for (let pixelIndex = 0; pixelIndex < accumulatedWeight.length; pixelIndex += 1) {
+      if (boundaryOnlyBlend && previousCoverageMap && previousCoverageMap[pixelIndex] > 0) {
+        continue
+      }
+
       if (accumulatedWeight[pixelIndex] > 0) {
         continue
       }
