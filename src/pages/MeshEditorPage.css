@@ -20,7 +20,7 @@
   min-height: 0;
   display: flex;
   overflow: auto;
-  padding: 1.5rem;
+  padding: 1rem;
   background: var(--background);
 }
 
@@ -147,8 +147,13 @@
   border: 1px solid var(--outline-variant, #2a2a30);
   border-radius: 12px;
   min-height: 0;
-  height: clamp(760px, calc(100vh - 185px), 1400px);
-  overflow: hidden;
+  height: clamp(680px, calc(100vh - 220px), 1400px);
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.mesh-editor-feedback ~ .mesh-editor-workspace .mesh-editor-layers-panel {
+  height: clamp(620px, calc(100vh - 290px), 1400px);
 }
 
 .mesh-editor-layers-panel__header {
@@ -419,6 +424,103 @@
   min-width: 4px;
 }
 
+.post-proc-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  padding: 0.75rem;
+  border-top: 1px solid var(--outline-variant, #2a2a30);
+  flex-shrink: 0;
+}
+
+.post-proc-panel__title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--on-surface-variant, #aaa);
+}
+
+.post-proc-panel__section-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--on-surface, #e0e0e0);
+  cursor: pointer;
+  user-select: none;
+  margin-top: 0.2rem;
+}
+
+.post-proc-panel__section-toggle input[type="checkbox"] {
+  accent-color: var(--primary, #ac89ff);
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.post-proc-panel__row {
+  display: grid;
+  grid-template-columns: 6rem 1fr 2.8rem;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+}
+
+.post-proc-panel__row label {
+  color: var(--on-surface-variant, #aaa);
+  font-size: 0.78rem;
+}
+
+.post-proc-panel__row input[type="range"] {
+  width: 100%;
+}
+
+.post-proc-panel__row span {
+  text-align: right;
+  font-size: 0.75rem;
+  color: var(--on-surface, #e0e0e0);
+  white-space: nowrap;
+}
+
+.post-proc-panel__actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.15rem;
+}
+
+.post-proc-panel__apply-btn,
+.post-proc-panel__reset-btn {
+  flex: 1;
+  padding: 0.38rem 0.6rem;
+  border-radius: 6px;
+  border: none;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.post-proc-panel__apply-btn {
+  background: var(--primary, #ac89ff);
+  color: #fff;
+}
+
+.post-proc-panel__apply-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.post-proc-panel__reset-btn {
+  background: var(--surface-variant, #2a2a30);
+  color: var(--on-surface-variant, #aaa);
+}
+
+.post-proc-panel__reset-btn:hover {
+  opacity: 0.8;
+}
+
 .mesh-editor-sidebar {
   display: flex;
   flex-direction: column;
@@ -437,9 +539,13 @@
 .mesh-editor-panel--compact {
     gap: 0.9rem;
     padding: 0.9rem;
-    max-height: calc(100vh - 240px);
+    max-height: calc(100vh - 220px);
     overflow-y: auto;
     min-height: 0;
+}
+
+.mesh-editor-feedback ~ .mesh-editor-workspace .mesh-editor-panel--compact {
+  max-height: calc(100vh - 290px);
 }
 
 .mesh-editor-panel__label {
@@ -695,14 +801,19 @@
 .mesh-editor-canvas-shell {
   position: relative;
 	margin-left: 50px;
-  min-height: 760px;
-  height: clamp(760px, calc(100vh - 185px), 1400px);
+  min-height: 680px;
+  height: clamp(680px, calc(100vh - 220px), 1400px);
   overflow: hidden;
   border-radius: var(--radius-xl);
   border: 1px solid rgba(71, 72, 74, 0.18);
   background:
     radial-gradient(circle at top, rgba(143, 245, 255, 0.08), transparent 42%),
     linear-gradient(180deg, rgba(24, 26, 29, 0.96), rgba(16, 17, 20, 0.98));
+}
+
+.mesh-editor-feedback ~ .mesh-editor-workspace .mesh-editor-canvas-shell {
+  min-height: 620px;
+  height: clamp(620px, calc(100vh - 290px), 1400px);
 }
 
 .mesh-editor-canvas-shell--texturing {

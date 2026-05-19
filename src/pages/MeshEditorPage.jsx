@@ -89,7 +89,7 @@ function drawProjectionCheckerboard(context, width, height) {
   const cellSize = Math.max(16, Math.round(width / 64))
   for (let cy = 0; cy < height; cy += cellSize) {
     for (let cx = 0; cx < width; cx += cellSize) {
-      context.fillStyle = (((cx / cellSize) + (cy / cellSize)) % 2 === 0) ? '#585858' : '#3a3a3a'
+      context.fillStyle = (((cx / cellSize) + (cy / cellSize)) % 2 === 0) ? '#d4d4d4' : '#bcbcbc'
       context.fillRect(cx, cy, cellSize, cellSize)
     }
   }
@@ -617,14 +617,11 @@ function resolveProjectionLayersIntoImageData(outputData, layerSnapshots, width,
       }
 
       const layerOpacity = clamp01((layer.opacity ?? 1) * srcAlpha)
-      
+
       // Use the pure 3D mathematically-derived confidence (based on facing angle and distance)
-      // We do NOT feather based on flat 2D pixels, and we do NOT artificially clamp it 
-      // based on polygon face-ownership, which caused perfectly jagged triangle borders.
       let conf = layer.confidenceMap?.[i] || 0
 
-      // A gentle curve to contrast the confidence slightly over the mesh curvature, 
-      // but without forcing it to 1.0 abruptly.
+      // A gentle curve to contrast the confidence slightly over the mesh curvature
       const smoothConf = conf * conf * (3 - 2 * conf)
 
       const mixWeight = smoothConf * layerOpacity
@@ -632,26 +629,29 @@ function resolveProjectionLayersIntoImageData(outputData, layerSnapshots, width,
         continue
       }
 
-      // factor determines how much this layer's color mixes into the final result
-      // strict stack priority: scaled by (1 - accumWeight)
+      // Cascade priority: each layer gets the remaining unoccupied weight
       const factor = mixWeight * (1 - accumWeight)
       if (factor <= 1e-4) {
         continue
       }
 
-      const srcR = layer.pixelData[j]
-      const srcG = layer.pixelData[j + 1]
-      const srcB = layer.pixelData[j + 2]
+      // The baked canvas stores color * blend (effectively premultiplied by the mask weight).
+      // Divide by srcAlpha to recover the actual projection colour before blending.
+      const invSrcAlpha = 1 / srcAlpha
+      const srcR = Math.min(255, Math.round(layer.pixelData[j]     * invSrcAlpha))
+      const srcG = Math.min(255, Math.round(layer.pixelData[j + 1] * invSrcAlpha))
+      const srcB = Math.min(255, Math.round(layer.pixelData[j + 2] * invSrcAlpha))
       const [blendR, blendG, blendB] = blendRgbByMode(layer.blendMode, baseR, baseG, baseB, srcR, srcG, srcB)
 
       accumR += blendR * factor
       accumG += blendG * factor
       accumB += blendB * factor
       accumWeight += factor
-      
-      // Use the pure 2D image alpha for the final silhouette opacity, 
-      // avoiding making internal 3D-angle seams semi-transparent!
-      finalMaxOpacity = Math.max(finalMaxOpacity, srcAlpha * clamp01(layer.opacity ?? 1))
+
+      // Any covered pixel must be fully opaque — using srcAlpha here caused
+      // the feathered mask edge to bleed the checkerboard through as a white
+      // gradient at projection silhouette boundaries.
+      finalMaxOpacity = Math.max(finalMaxOpacity, clamp01(layer.opacity ?? 1))
     }
 
     if (accumWeight > 0) {
@@ -674,6 +674,387 @@ function resolveProjectionLayersIntoImageData(outputData, layerSnapshots, width,
       outputData[j + 3] = 255
     }
   }
+}
+
+async function applySeamPostProcessing(textureCanvas, layerSnapshots, seamThreshold, blurRadius, strength) {
+  const w = textureCanvas.width
+  const h = textureCanvas.height
+  const pixelCount = w * h
+
+  // Build per-pixel max confidence and coverage union from snapshot data
+  const maxConf = new Float32Array(pixelCount)
+  const anyCoverage = new Uint8Array(pixelCount)
+  for (let li = 0; li < layerSnapshots.length; li++) {
+    const layer = layerSnapshots[li]
+    if (!layer?.coverageMask || !layer?.confidenceMap) continue
+    for (let i = 0; i < pixelCount; i++) {
+      if (layer.coverageMask[i]) {
+        anyCoverage[i] = 1
+        if (layer.confidenceMap[i] > maxConf[i]) maxConf[i] = layer.confidenceMap[i]
+      }
+    }
+  }
+
+  // Read current texture pixels
+  const ctx = textureCanvas.getContext('2d')
+  const origData = ctx.getImageData(0, 0, w, h)
+
+  // Build a coverage-masked canvas (uncovered pixels are transparent)
+  const maskCanvas = document.createElement('canvas')
+  maskCanvas.width = w
+  maskCanvas.height = h
+  const maskCtx = maskCanvas.getContext('2d')
+  const maskImg = maskCtx.createImageData(w, h)
+  for (let i = 0; i < pixelCount; i++) {
+    const j = i * 4
+    if (anyCoverage[i]) {
+      maskImg.data[j]     = origData.data[j]
+      maskImg.data[j + 1] = origData.data[j + 1]
+      maskImg.data[j + 2] = origData.data[j + 2]
+      maskImg.data[j + 3] = 255
+    }
+    // else leave transparent (0)
+  }
+  maskCtx.putImageData(maskImg, 0, 0)
+
+  // Blur with CSS filter — GPU-accelerated, spreads covered colours into seam zone
+  const blurCanvas = document.createElement('canvas')
+  blurCanvas.width = w
+  blurCanvas.height = h
+  const blurCtx = blurCanvas.getContext('2d')
+  blurCtx.filter = `blur(${blurRadius}px)`
+  blurCtx.drawImage(maskCanvas, 0, 0)
+  blurCtx.filter = 'none'
+  const blurData = blurCtx.getImageData(0, 0, w, h).data
+
+  // Blend blurred colours into seam pixels (low-confidence covered pixels)
+  const outData = new Uint8ClampedArray(origData.data)
+  for (let i = 0; i < pixelCount; i++) {
+    if (!anyCoverage[i]) continue
+    const conf = maxConf[i]
+    if (conf >= seamThreshold) continue  // well-textured pixel — leave alone
+    const j = i * 4
+    const blurAlpha = blurData[j + 3] / 255
+    if (blurAlpha < 0.01) continue
+
+    const t = 1 - conf / seamThreshold  // 0 at threshold edge, 1 at conf=0
+    const smooth = t * t * (3 - 2 * t)
+    const blendFactor = smooth * strength
+
+    // Unpremultiply blur colour
+    const bR = blurData[j]     / blurAlpha
+    const bG = blurData[j + 1] / blurAlpha
+    const bB = blurData[j + 2] / blurAlpha
+
+    outData[j]     = Math.round(outData[j]     * (1 - blendFactor) + bR * blendFactor)
+    outData[j + 1] = Math.round(outData[j + 1] * (1 - blendFactor) + bG * blendFactor)
+    outData[j + 2] = Math.round(outData[j + 2] * (1 - blendFactor) + bB * blendFactor)
+    // alpha stays 255
+  }
+
+  const outImg = new ImageData(outData, w, h)
+  ctx.putImageData(outImg, 0, 0)
+}
+
+// 3D-aware hole filling. UV-space proximity is unreliable for AI-generated
+// meshes where neighbouring UV islands can come from opposite sides of the
+// body, so we fill each uncovered texel from the K nearest covered samples
+// in 3D world space instead.
+async function fillHolesPostProcessing(textureCanvas, layerSnapshots, texturableMesh, smoothness, onProgress) {
+  const w = textureCanvas.width
+  const h = textureCanvas.height
+  const pixelCount = w * h
+
+  // Build coverage union across all snapshots
+  const anyCoverage = new Uint8Array(pixelCount)
+  for (let li = 0; li < layerSnapshots.length; li++) {
+    const layer = layerSnapshots[li]
+    if (!layer?.coverageMask) continue
+    for (let i = 0; i < pixelCount; i++) {
+      if (layer.coverageMask[i]) anyCoverage[i] = 1
+    }
+  }
+
+  // Gather textured meshes (every mesh under root with a uv attribute)
+  const meshes = []
+  if (texturableMesh?.root) {
+    texturableMesh.root.traverse(obj => {
+      if (obj.isMesh && obj.geometry && obj.geometry.attributes?.uv) {
+        meshes.push(obj)
+      }
+    })
+  }
+  if (meshes.length === 0) return
+
+  const textureConfig = texturableMesh.textureConfig
+  const ctx = textureCanvas.getContext('2d')
+  const origData = ctx.getImageData(0, 0, w, h)
+  const outData = new Uint8ClampedArray(origData.data)
+
+  const vA = new THREE.Vector3()
+  const vB = new THREE.Vector3()
+  const vC = new THREE.Vector3()
+  const uvA = new THREE.Vector2()
+  const uvB = new THREE.Vector2()
+  const uvC = new THREE.Vector2()
+
+  // ── PASS 1: build samples (3D position + texture colour) from covered triangles ──
+  const samples = []  // flat: [x, y, z, r, g, b, ...]
+
+  for (let mi = 0; mi < meshes.length; mi++) {
+    const mesh = meshes[mi]
+    mesh.updateWorldMatrix(true, false)
+    const matrixWorld = mesh.matrixWorld
+    const geom = mesh.geometry
+    const posAttr = geom.attributes.position
+    const uvAttr = geom.attributes.uv
+    const indexAttr = geom.index
+    const triCount = indexAttr ? indexAttr.count / 3 : posAttr.count / 3
+
+    for (let t = 0; t < triCount; t++) {
+      const base = t * 3
+      const i0 = indexAttr ? indexAttr.getX(base) : base
+      const i1 = indexAttr ? indexAttr.getX(base + 1) : base + 1
+      const i2 = indexAttr ? indexAttr.getX(base + 2) : base + 2
+
+      vA.fromBufferAttribute(posAttr, i0).applyMatrix4(matrixWorld)
+      vB.fromBufferAttribute(posAttr, i1).applyMatrix4(matrixWorld)
+      vC.fromBufferAttribute(posAttr, i2).applyMatrix4(matrixWorld)
+
+      uvA.set(uvAttr.getX(i0), uvAttr.getY(i0))
+      uvB.set(uvAttr.getX(i1), uvAttr.getY(i1))
+      uvC.set(uvAttr.getX(i2), uvAttr.getY(i2))
+      const pA = mapUvToCanvasPoint(uvA, w, h, textureConfig)
+      const pB = mapUvToCanvasPoint(uvB, w, h, textureConfig)
+      const pC = mapUvToCanvasPoint(uvC, w, h, textureConfig)
+
+      const ucx = Math.floor((pA.x + pB.x + pC.x) / 3)
+      const ucy = Math.floor((pA.y + pB.y + pC.y) / 3)
+      if (ucx < 0 || ucx >= w || ucy < 0 || ucy >= h) continue
+
+      const centroidIdx = ucy * w + ucx
+      if (!anyCoverage[centroidIdx]) continue
+
+      const j = centroidIdx * 4
+      samples.push(
+        (vA.x + vB.x + vC.x) / 3,
+        (vA.y + vB.y + vC.y) / 3,
+        (vA.z + vB.z + vC.z) / 3,
+        origData.data[j],
+        origData.data[j + 1],
+        origData.data[j + 2]
+      )
+    }
+  }
+
+  const sampleCount = samples.length / 6
+  if (sampleCount === 0) return
+
+  // ── Build a spatial hash grid for fast 3D nearest-neighbour queries ──
+  let minX = Infinity, maxX = -Infinity
+  let minY = Infinity, maxY = -Infinity
+  let minZ = Infinity, maxZ = -Infinity
+  for (let i = 0; i < sampleCount; i++) {
+    const x = samples[i * 6], y = samples[i * 6 + 1], z = samples[i * 6 + 2]
+    if (x < minX) minX = x; if (x > maxX) maxX = x
+    if (y < minY) minY = y; if (y > maxY) maxY = y
+    if (z < minZ) minZ = z; if (z > maxZ) maxZ = z
+  }
+  const bboxSize = Math.max(maxX - minX, maxY - minY, maxZ - minZ, 1e-6)
+  const cellsPerDim = Math.max(4, Math.min(48, Math.round(Math.cbrt(sampleCount) * 1.4)))
+  const cellSize = bboxSize / cellsPerDim
+  const invCellSize = 1 / cellSize
+
+  // Pack (cx, cy, cz) into a single int key: assumes |c| < 1024
+  const hashCell = (cx, cy, cz) => ((cx + 512) << 20) | ((cy + 512) << 10) | (cz + 512)
+
+  const grid = new Map()
+  for (let i = 0; i < sampleCount; i++) {
+    const cx = Math.floor((samples[i * 6]     - minX) * invCellSize)
+    const cy = Math.floor((samples[i * 6 + 1] - minY) * invCellSize)
+    const cz = Math.floor((samples[i * 6 + 2] - minZ) * invCellSize)
+    const key = hashCell(cx, cy, cz)
+    let cell = grid.get(key)
+    if (!cell) { cell = []; grid.set(key, cell) }
+    cell.push(i)
+  }
+
+  const K = Math.max(1, Math.min(32, Math.round(smoothness)))
+
+  // Returns [r, g, b] for a query 3D point
+  function findFillColor(qx, qy, qz) {
+    const baseCx = Math.floor((qx - minX) * invCellSize)
+    const baseCy = Math.floor((qy - minY) * invCellSize)
+    const baseCz = Math.floor((qz - minZ) * invCellSize)
+
+    let candidates = []
+    let radius = 0
+    const maxRadius = cellsPerDim * 2 + 4
+
+    while (candidates.length < K && radius <= maxRadius) {
+      if (radius === 0) {
+        const cell = grid.get(hashCell(baseCx, baseCy, baseCz))
+        if (cell) candidates.push(...cell)
+      } else {
+        // Add shells of cells at exactly this radius
+        for (let dz = -radius; dz <= radius; dz++) {
+          for (let dy = -radius; dy <= radius; dy++) {
+            for (let dx = -radius; dx <= radius; dx++) {
+              if (Math.max(Math.abs(dx), Math.abs(dy), Math.abs(dz)) !== radius) continue
+              const cell = grid.get(hashCell(baseCx + dx, baseCy + dy, baseCz + dz))
+              if (cell) candidates.push(...cell)
+            }
+          }
+        }
+      }
+      radius++
+    }
+
+    if (candidates.length === 0) {
+      for (let i = 0; i < sampleCount; i++) candidates.push(i)
+    }
+
+    // Compute distances and pick K nearest
+    const dArr = new Array(candidates.length)
+    for (let c = 0; c < candidates.length; c++) {
+      const sIdx = candidates[c]
+      const dx = samples[sIdx * 6]     - qx
+      const dy = samples[sIdx * 6 + 1] - qy
+      const dz = samples[sIdx * 6 + 2] - qz
+      dArr[c] = [sIdx, dx * dx + dy * dy + dz * dz]
+    }
+    dArr.sort((a, b) => a[1] - b[1])
+
+    const numK = Math.min(K, dArr.length)
+    let sumR = 0, sumG = 0, sumB = 0, sumW = 0
+    for (let k = 0; k < numK; k++) {
+      const [sIdx, d2] = dArr[k]
+      const weight = 1 / (d2 + 1e-6)
+      sumR += samples[sIdx * 6 + 3] * weight
+      sumG += samples[sIdx * 6 + 4] * weight
+      sumB += samples[sIdx * 6 + 5] * weight
+      sumW += weight
+    }
+    return [sumR / sumW, sumG / sumW, sumB / sumW]
+  }
+
+  // Per-vertex colour cache (vertex world-pos → fill colour)
+  const vertexColorCache = new Map()
+  function getVertexFillColor(x, y, z) {
+    const kx = Math.round(x * 1e4)
+    const ky = Math.round(y * 1e4)
+    const kz = Math.round(z * 1e4)
+    const key = `${kx},${ky},${kz}`
+    let c = vertexColorCache.get(key)
+    if (!c) {
+      c = findFillColor(x, y, z)
+      vertexColorCache.set(key, c)
+    }
+    return c
+  }
+
+  // Total triangle count for progress
+  let totalTris = 0
+  for (const m of meshes) {
+    const g = m.geometry
+    totalTris += (g.index ? g.index.count : g.attributes.position.count) / 3
+  }
+
+  // ── PASS 2: rasterise every triangle, fill uncovered texels by barycentric vertex-colour interpolation ──
+  let trisDone = 0
+  let lastYield = performance.now()
+
+  for (let mi = 0; mi < meshes.length; mi++) {
+    const mesh = meshes[mi]
+    const matrixWorld = mesh.matrixWorld
+    const geom = mesh.geometry
+    const posAttr = geom.attributes.position
+    const uvAttr = geom.attributes.uv
+    const indexAttr = geom.index
+    const triCount = indexAttr ? indexAttr.count / 3 : posAttr.count / 3
+
+    for (let t = 0; t < triCount; t++) {
+      const base = t * 3
+      const i0 = indexAttr ? indexAttr.getX(base) : base
+      const i1 = indexAttr ? indexAttr.getX(base + 1) : base + 1
+      const i2 = indexAttr ? indexAttr.getX(base + 2) : base + 2
+
+      vA.fromBufferAttribute(posAttr, i0).applyMatrix4(matrixWorld)
+      vB.fromBufferAttribute(posAttr, i1).applyMatrix4(matrixWorld)
+      vC.fromBufferAttribute(posAttr, i2).applyMatrix4(matrixWorld)
+
+      uvA.set(uvAttr.getX(i0), uvAttr.getY(i0))
+      uvB.set(uvAttr.getX(i1), uvAttr.getY(i1))
+      uvC.set(uvAttr.getX(i2), uvAttr.getY(i2))
+      const pA = mapUvToCanvasPoint(uvA, w, h, textureConfig)
+      const pB = mapUvToCanvasPoint(uvB, w, h, textureConfig)
+      const pC = mapUvToCanvasPoint(uvC, w, h, textureConfig)
+
+      const x0 = pA.x, y0 = pA.y
+      const x1 = pB.x, y1 = pB.y
+      const x2 = pC.x, y2 = pC.y
+
+      const denom = (y1 - y2) * (x0 - x2) + (x2 - x1) * (y0 - y2)
+      if (Math.abs(denom) < 1e-10) { trisDone++; continue }
+
+      const minPx = Math.max(0, Math.floor(Math.min(x0, x1, x2)))
+      const maxPx = Math.min(w - 1, Math.ceil(Math.max(x0, x1, x2)))
+      const minPy = Math.max(0, Math.floor(Math.min(y0, y1, y2)))
+      const maxPy = Math.min(h - 1, Math.ceil(Math.max(y0, y1, y2)))
+
+      // Fast skip if every pixel in the bbox is already covered
+      let hasUncovered = false
+      for (let py = minPy; py <= maxPy && !hasUncovered; py++) {
+        const row = py * w
+        for (let px = minPx; px <= maxPx; px++) {
+          if (!anyCoverage[row + px]) { hasUncovered = true; break }
+        }
+      }
+      if (!hasUncovered) { trisDone++; continue }
+
+      const cA = getVertexFillColor(vA.x, vA.y, vA.z)
+      const cB = getVertexFillColor(vB.x, vB.y, vB.z)
+      const cC = getVertexFillColor(vC.x, vC.y, vC.z)
+
+      const invDenom = 1 / denom
+      const baryEps = -1e-3
+
+      for (let py = minPy; py <= maxPy; py++) {
+        const row = py * w
+        for (let px = minPx; px <= maxPx; px++) {
+          const pixelIdx = row + px
+          if (anyCoverage[pixelIdx]) continue
+
+          const fx = px + 0.5
+          const fy = py + 0.5
+          const wa = ((y1 - y2) * (fx - x2) + (x2 - x1) * (fy - y2)) * invDenom
+          const wb = ((y2 - y0) * (fx - x2) + (x0 - x2) * (fy - y2)) * invDenom
+          const wc = 1 - wa - wb
+          if (wa < baryEps || wb < baryEps || wc < baryEps) continue
+
+          const j = pixelIdx * 4
+          outData[j]     = Math.round(wa * cA[0] + wb * cB[0] + wc * cC[0])
+          outData[j + 1] = Math.round(wa * cA[1] + wb * cB[1] + wc * cC[1])
+          outData[j + 2] = Math.round(wa * cA[2] + wb * cB[2] + wc * cC[2])
+          outData[j + 3] = 255
+        }
+      }
+
+      trisDone++
+
+      if ((trisDone & 0xFF) === 0) {
+        const now = performance.now()
+        if (now - lastYield > 30) {
+          if (onProgress) onProgress(trisDone / totalTris)
+          await new Promise(r => setTimeout(r, 0))
+          lastYield = now
+        }
+      }
+    }
+  }
+
+  if (onProgress) onProgress(1)
+  ctx.putImageData(new ImageData(outData, w, h), 0, 0)
 }
 
 function getRectangleBounds(startPoint, endPoint) {
@@ -2317,6 +2698,13 @@ export default function MeshEditorPage() {
   const [patchSaturation, setPatchSaturation] = useState(1.0); // 0 → 2	
   const [multiViewCount, setMultiViewCount] = useState(1)
   const [projectionOpacities, setProjectionOpacities] = useState([1])
+  const [postProcSeamThreshold, setPostProcSeamThreshold] = useState(0.35)
+  const [postProcBlurRadius, setPostProcBlurRadius] = useState(8)
+  const [postProcStrength, setPostProcStrength] = useState(0.85)
+  const [postProcSeamEnabled, setPostProcSeamEnabled] = useState(true)
+  const [postProcFillHolesEnabled, setPostProcFillHolesEnabled] = useState(true)
+  const [postProcFillHolesBlur, setPostProcFillHolesBlur] = useState(8)
+  const [postProcApplied, setPostProcApplied] = useState(false)
 
   const assetId = searchParams.get('assetId') || ''
   const numericAssetId = Number(assetId)
@@ -2338,6 +2726,8 @@ export default function MeshEditorPage() {
   const projectionCameraRef = useRef(null)
   const [hasProjectionMask, setHasProjectionMask] = useState(false)
   const originalTextureBackupRef = useRef(null)
+  const postProcBackupRef = useRef(null)
+  const projectionLayerSnapshotsRef = useRef([])
   const patchedTextureRef = useRef(null)
   const projectionViewDataRef = useRef([])
   const projectionCoverageRef = useRef(null)
@@ -5666,6 +6056,9 @@ export default function MeshEditorPage() {
 
       resolveProjectionLayersIntoImageData(composedData, layerSnapshots, texW, texH)
       textureContext.putImageData(composedImage, 0, 0)
+      projectionLayerSnapshotsRef.current = layerSnapshots
+      postProcBackupRef.current = null  // invalidate any prior post-proc backup on rebuild
+      setPostProcApplied(false)
       projectionCoverageRef.current = null
       projectionFaceOwnershipRef.current.clear()
       updateCanvasTexture(displayTextureRef.current)
@@ -5784,6 +6177,9 @@ export default function MeshEditorPage() {
     setPatchNoise(0)
     setProjectionOpacities([1])
     originalTextureBackupRef.current = null
+    postProcBackupRef.current = null
+    projectionLayerSnapshotsRef.current = []
+    setPostProcApplied(false)
     patchedTextureRef.current = null
     projectionViewDataRef.current = []
     projectionMaskBackupRef.current = null
@@ -5810,6 +6206,73 @@ export default function MeshEditorPage() {
     const isModified = draft.blendPixels !== layerBlendPixels || draft.cropBorder !== layerCropBorder
     return count + (isModified ? 1 : 0)
   }, 0)
+
+  const handleApplyPostProcessing = useCallback(async () => {
+    if (!texturableMesh?.textureCanvas) return
+    const snapshots = projectionLayerSnapshotsRef.current
+    if (!snapshots || snapshots.length === 0) return
+    if (!postProcSeamEnabled && !postProcFillHolesEnabled) return
+
+    const textureCanvas = texturableMesh.textureCanvas
+
+    setProjectionRebuilding(true)
+    setProjectionRebuildProgress(0)
+
+    try {
+      // Save a backup on first apply so we can reset or re-apply idempotently
+      if (!postProcBackupRef.current) {
+        const backupCanvas = document.createElement('canvas')
+        backupCanvas.width = textureCanvas.width
+        backupCanvas.height = textureCanvas.height
+        backupCanvas.getContext('2d').drawImage(textureCanvas, 0, 0)
+        postProcBackupRef.current = backupCanvas
+      } else {
+        textureCanvas.getContext('2d').drawImage(postProcBackupRef.current, 0, 0)
+      }
+
+      // Fill Holes runs first so Seam Smoothing can smooth the new fill boundaries
+      if (postProcFillHolesEnabled) {
+        setFeedback('Filling holes (3D-aware)...')
+        const fillShare = postProcSeamEnabled ? 0.9 : 1.0
+        await fillHolesPostProcessing(
+          textureCanvas,
+          snapshots,
+          texturableMesh,
+          postProcFillHolesBlur,
+          p => setProjectionRebuildProgress(p * fillShare)
+        )
+      }
+      if (postProcSeamEnabled) {
+        setFeedback('Smoothing seams...')
+        setProjectionRebuildProgress(postProcFillHolesEnabled ? 0.9 : 0)
+        await applySeamPostProcessing(textureCanvas, snapshots, postProcSeamThreshold, postProcBlurRadius, postProcStrength)
+      }
+
+      setProjectionRebuildProgress(1)
+      updateCanvasTexture(displayTextureRef.current)
+      setTextureRevision(current => current + 1)
+      setPostProcApplied(true)
+      setFeedback('Post-processing complete.')
+    } catch (err) {
+      console.error('[Post Processing] Failed:', err)
+      setFeedback('Post-processing failed.')
+    } finally {
+      setProjectionRebuilding(false)
+    }
+  }, [
+    texturableMesh,
+    postProcSeamEnabled, postProcSeamThreshold, postProcBlurRadius, postProcStrength,
+    postProcFillHolesEnabled, postProcFillHolesBlur
+  ])
+
+  const handleResetPostProcessing = useCallback(() => {
+    if (!texturableMesh?.textureCanvas || !postProcBackupRef.current) return
+    texturableMesh.textureCanvas.getContext('2d').drawImage(postProcBackupRef.current, 0, 0)
+    updateCanvasTexture(displayTextureRef.current)
+    setTextureRevision(current => current + 1)
+    postProcBackupRef.current = null
+    setPostProcApplied(false)
+  }, [texturableMesh])
 
   const handleRunProjectionWorkflow = useCallback(async () => {
     if (projecting || !projectionStarted || !projectionReady || !selectedProjectionWorkflow || !texturableMesh?.textureCanvas) {
@@ -7880,6 +8343,94 @@ export default function MeshEditorPage() {
                     })
                   )}
                 </div>
+
+                {projectionLayers.length > 0 && (
+                  <div className="post-proc-panel">
+                    <div className="post-proc-panel__title">Post Processing</div>
+
+                    {/* ── Fill Holes ── */}
+                    <label className="post-proc-panel__section-toggle">
+                      <input
+                        type="checkbox"
+                        checked={postProcFillHolesEnabled}
+                        onChange={e => setPostProcFillHolesEnabled(e.target.checked)}
+                      />
+                      Fill Holes
+                    </label>
+                    {postProcFillHolesEnabled && (
+                      <div className="post-proc-panel__row">
+                        <label>Smoothness</label>
+                        <input
+                          type="range" min="1" max="32" step="1"
+                          value={postProcFillHolesBlur}
+                          onChange={e => setPostProcFillHolesBlur(Number(e.target.value))}
+                        />
+                        <span>{postProcFillHolesBlur}</span>
+                      </div>
+                    )}
+
+                    {/* ── Seam Smoothing ── */}
+                    <label className="post-proc-panel__section-toggle">
+                      <input
+                        type="checkbox"
+                        checked={postProcSeamEnabled}
+                        onChange={e => setPostProcSeamEnabled(e.target.checked)}
+                      />
+                      Seam Smoothing
+                    </label>
+                    {postProcSeamEnabled && (
+                      <>
+                        <div className="post-proc-panel__row">
+                          <label>Seam width</label>
+                          <input
+                            type="range" min="0.05" max="1.0" step="0.01"
+                            value={postProcSeamThreshold}
+                            onChange={e => setPostProcSeamThreshold(Number(e.target.value))}
+                          />
+                          <span>{postProcSeamThreshold.toFixed(2)}</span>
+                        </div>
+                        <div className="post-proc-panel__row">
+                          <label>Blur radius</label>
+                          <input
+                            type="range" min="1" max="32" step="1"
+                            value={postProcBlurRadius}
+                            onChange={e => setPostProcBlurRadius(Number(e.target.value))}
+                          />
+                          <span>{postProcBlurRadius}px</span>
+                        </div>
+                        <div className="post-proc-panel__row">
+                          <label>Strength</label>
+                          <input
+                            type="range" min="0.0" max="1.0" step="0.01"
+                            value={postProcStrength}
+                            onChange={e => setPostProcStrength(Number(e.target.value))}
+                          />
+                          <span>{Math.round(postProcStrength * 100)}%</span>
+                        </div>
+                      </>
+                    )}
+
+                    <div className="post-proc-panel__actions">
+                      <button
+                        type="button"
+                        className="post-proc-panel__apply-btn"
+                        onClick={handleApplyPostProcessing}
+                        disabled={projectionRebuilding || (!postProcSeamEnabled && !postProcFillHolesEnabled)}
+                      >
+                        {postProcApplied ? 'Re-apply' : 'Apply'}
+                      </button>
+                      {postProcApplied && (
+                        <button
+                          type="button"
+                          className="post-proc-panel__reset-btn"
+                          onClick={handleResetPostProcessing}
+                        >
+                          Reset
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
               </aside>
             )}
           </div>
