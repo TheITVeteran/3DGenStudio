@@ -253,41 +253,6 @@ function buildProjectionCoverageMaskFromBakedAlpha(alphaBytes, width, height, {
   return next
 }
 
-function buildProjectionSharedSeamMask(coverageMask, ownershipMask, width, height, seamPixels = 0) {
-  const pixelCount = width * height
-  const sharedMask = new Uint8Array(pixelCount)
-  if (
-    !coverageMask
-    || !ownershipMask
-    || coverageMask.length !== pixelCount
-    || ownershipMask.length !== pixelCount
-    || !width
-    || !height
-  ) {
-    return sharedMask
-  }
-
-  const seamRadiusPx = Math.max(0, Math.min(8, Math.round(Number(seamPixels) || 0)))
-  if (seamRadiusPx <= 0) {
-    return sharedMask
-  }
-
-  const seamRadiusCost = Math.max(10, seamRadiusPx * 10)
-  const distToOutsideOwnership = computeProjectionDistanceInsideMask(ownershipMask, width, height)
-
-  for (let i = 0; i < pixelCount; i += 1) {
-    if (!coverageMask[i]) {
-      continue
-    }
-
-    if (!ownershipMask[i] || distToOutsideOwnership[i] <= seamRadiusCost) {
-      sharedMask[i] = 1
-    }
-  }
-
-  return sharedMask
-}
-
 function buildProjectionConfidenceMap(accumulatedWeight, coverageMask, alphaBytes) {
   const pixelCount = accumulatedWeight?.length || 0
   const confidence = new Float32Array(pixelCount)
@@ -5998,6 +5963,8 @@ export default function MeshEditorPage() {
             textureWidth: texW,
             textureHeight: texH,
             binaryMask: false,
+            // Drives the view-space seam radius (croppable border width).
+            blendPixels: effectiveBlendPixels,
             grazingCoverageThreshold: 0.15,
             minFacingCos: 0,
             facingPower: 1.2,
@@ -6052,13 +6019,20 @@ export default function MeshEditorPage() {
             minAlpha: 112,
             stitchEdges: false
           })
-          const sharedSeamMask = buildProjectionSharedSeamMask(
-            coverageMask,
-            ownershipMask,
-            texW,
-            texH,
-            effectiveBlendPixels
-          )
+          // Seams are the projection's croppable view-space border (outer
+          // silhouette + self-occlusion edges), computed during the bake from
+          // screen-space coverage rather than the UV layout. AND with the final
+          // coverage so seams only mark texels that actually ended up covered
+          // after gap-fill / edge-bleed.
+          const viewSeamMask = accumulateStats?.viewSeamMask
+          const sharedSeamMask = new Uint8Array(texW * texH)
+          if (viewSeamMask && viewSeamMask.length === texW * texH) {
+            for (let i = 0; i < sharedSeamMask.length; i += 1) {
+              if (coverageMask[i] && viewSeamMask[i]) {
+                sharedSeamMask[i] = 1
+              }
+            }
+          }
           const confidenceMap = buildProjectionConfidenceMap(accumulatedWeight, coverageMask, alphaBytes)
 
           layerData.bakedCanvas = bakedCanvas

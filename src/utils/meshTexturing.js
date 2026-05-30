@@ -130,6 +130,86 @@ function samplePackedDepth(depthPrepass, screenX, screenY) {
   return unpackRgbDepth(pixels[idx], pixels[idx + 1], pixels[idx + 2], pixels[idx + 3])
 }
 
+// Two-pass chamfer distance transform: for every pixel inside `mask` (value > 0)
+// returns the approximate distance (cost units: 10 per ortho step, 14 per diag)
+// to the nearest pixel outside the mask. Pixels outside the mask are 0.
+// Used to measure how far a covered screen pixel sits from the projection's
+// screen-space silhouette / occlusion border.
+function computeScreenDistanceInsideMask(mask, width, height) {
+  const pixelCount = width * height
+  const dist = new Int32Array(pixelCount)
+  if (!mask || mask.length !== pixelCount || !width || !height) {
+    return dist
+  }
+
+  const INF = 1 << 29
+  const ORTHO = 10
+  const DIAG = 14
+
+  for (let i = 0; i < pixelCount; i += 1) {
+    dist[i] = mask[i] > 0 ? INF : 0
+  }
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const i = y * width + x
+      let best = dist[i]
+      if (x > 0) best = Math.min(best, dist[i - 1] + ORTHO)
+      if (y > 0) best = Math.min(best, dist[i - width] + ORTHO)
+      if (x > 0 && y > 0) best = Math.min(best, dist[i - width - 1] + DIAG)
+      if (x + 1 < width && y > 0) best = Math.min(best, dist[i - width + 1] + DIAG)
+      dist[i] = best
+    }
+  }
+
+  for (let y = height - 1; y >= 0; y -= 1) {
+    for (let x = width - 1; x >= 0; x -= 1) {
+      const i = y * width + x
+      let best = dist[i]
+      if (x + 1 < width) best = Math.min(best, dist[i + 1] + ORTHO)
+      if (y + 1 < height) best = Math.min(best, dist[i + width] + ORTHO)
+      if (x > 0 && y + 1 < height) best = Math.min(best, dist[i + width - 1] + DIAG)
+      if (x + 1 < width && y + 1 < height) best = Math.min(best, dist[i + width + 1] + DIAG)
+      dist[i] = best
+    }
+  }
+
+  return dist
+}
+
+// Fills 1px pinholes / stitches anti-aliased edge fragments in a binary screen
+// coverage mask so depth/raycast speckle does not create false pinhole seams.
+function stitchScreenCoverageMask(mask, width, height) {
+  const pixelCount = width * height
+  if (!mask || mask.length !== pixelCount) {
+    return mask
+  }
+
+  const next = mask.slice()
+  const has = (x, y) => {
+    if (x < 0 || y < 0 || x >= width || y >= height) {
+      return 0
+    }
+    return mask[y * width + x]
+  }
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const i = y * width + x
+      if (mask[i]) {
+        continue
+      }
+      const ortho = has(x - 1, y) + has(x + 1, y) + has(x, y - 1) + has(x, y + 1)
+      const diag = has(x - 1, y - 1) + has(x + 1, y - 1) + has(x - 1, y + 1) + has(x + 1, y + 1)
+      if (ortho >= 3 || (ortho >= 2 && diag >= 2)) {
+        next[i] = 1
+      }
+    }
+  }
+
+  return next
+}
+
 function captureDepthPrepass({ meshes, camera, width, height }) {
   if (!Array.isArray(meshes) || meshes.length === 0 || !camera || !width || !height) {
     return null
@@ -1638,6 +1718,17 @@ export async function accumulateProjectedPatch({
     : null
   const touchedCoverageIndices = touchedCoverage ? [] : null
 
+  // Screen-space coverage of accepted (non-grazing) samples, in bbox-local
+  // resolution (the same space as localX/localY below). Its silhouette is the
+  // projection's croppable view-space border (outer outline + self-occlusion
+  // holes), independent of the UV layout. `texelScreenIdx` maps each covered
+  // texel back to its screen pixel so the border distance can be looked up per
+  // texel after the bake.
+  const screenSeamWidth = bbox.width
+  const screenSeamHeight = bbox.height
+  const screenCoverage = new Uint8Array(screenSeamWidth * screenSeamHeight)
+  const texelScreenIdx = new Int32Array(textureWidth * textureHeight).fill(-1)
+
   camera.updateMatrixWorld?.(true)
   root.updateMatrixWorld?.(true)
   const projectableMeshes = ensureRaycastAcceleration(root, textureKey)
@@ -1673,7 +1764,8 @@ export async function accumulateProjectedPatch({
       durationMs: performance.now() - startedAt,
       activePixelCount,
       processedSamples: 0,
-      appliedSamples: 0
+      appliedSamples: 0,
+      viewSeamMask: new Uint8Array(textureWidth * textureHeight)
     }
   }
 
@@ -2005,6 +2097,17 @@ export async function accumulateProjectedPatch({
               touchedCoverage[pixelIdx] = 1
               touchedCoverageIndices.push(pixelIdx)
             }
+
+            // Record the screen footprint of accepted samples so the seam mask
+            // can later be derived from the view-space silhouette rather than
+            // the UV layout. Grazing (near-silhouette) texels are mapped but not
+            // counted as covered, so they fall on the border and become seams.
+            const screenSeamIdx = localY * screenSeamWidth + localX
+            texelScreenIdx[pixelIdx] = screenSeamIdx
+            if (!isGrazingTriangle) {
+              screenCoverage[screenSeamIdx] = 1
+            }
+
             appliedSamples += 1
           }
         }
@@ -2062,6 +2165,27 @@ export async function accumulateProjectedPatch({
       }
     }
 
+    // Derive the view-space seam mask: a texel is a seam when its screen
+    // footprint lies within `seamRadiusCost` of the projection's screen-space
+    // coverage border. Interior UV-island gutters project to the middle of the
+    // coverage (large distance) and are correctly excluded.
+    const viewSeamMask = new Uint8Array(textureWidth * textureHeight)
+    const seamRadiusPx = Math.max(0, Math.min(64, Math.round(Number(blendPixels) || 0)))
+    if (seamRadiusPx > 0) {
+      const stitchedScreenCoverage = stitchScreenCoverageMask(screenCoverage, screenSeamWidth, screenSeamHeight)
+      const screenDist = computeScreenDistanceInsideMask(stitchedScreenCoverage, screenSeamWidth, screenSeamHeight)
+      const seamRadiusCost = Math.max(10, seamRadiusPx * 10)
+      for (let i = 0; i < texelScreenIdx.length; i += 1) {
+        const screenIdx = texelScreenIdx[i]
+        if (screenIdx < 0) {
+          continue
+        }
+        if (screenDist[screenIdx] <= seamRadiusCost) {
+          viewSeamMask[i] = 1
+        }
+      }
+    }
+
     return {
       durationMs: performance.now() - startedAt,
       activePixelCount,
@@ -2069,6 +2193,7 @@ export async function accumulateProjectedPatch({
       appliedSamples,
       coveredPixels: touchedCoverageIndices?.length || 0,
       lockedFaces,
+      viewSeamMask,
       occlusionModeUsed: useDepthPrepassOcclusion
         ? 'depth-prepass'
         : (useRaycastOcclusion ? 'raycast' : 'none')
