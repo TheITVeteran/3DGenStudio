@@ -54,6 +54,11 @@ import {
   estimateMaskOrbitTarget
 } from '../utils/meshTexturing'
 import {
+  bakeViewToTextureGPU,
+  bakeMultiViewTextureGPU,
+  isGpuBakeSupported
+} from '../utils/gpuTextureBake'
+import {
   applyBrushTextureWeights as applySculptBrushTextureWeights,
   applyClay as applySculptClay,
   applyFlatten as applySculptFlatten,
@@ -80,6 +85,16 @@ import SculptToolsPanel from '../components/SculptToolsPanel';
 
 const AUTO_PROJECTION_SEAM_SAFE_CROP_PX = 0
 const AUTO_PROJECTION_SEAM_SAFE_BLEND_PX = 0
+// GPU UV-space projection bake (see utils/gpuTextureBake.js and the projection
+// analysis). When the platform supports float render targets, each layer is baked
+// on the GPU: a native depth-map occlusion test + parallel per-texel projective
+// texturing replace the CPU per-texel loop and per-texel BVH raycast. The CPU path
+// (accumulateProjectedPatch + finalizeProjectedPatch) stays as the automatic fallback.
+const USE_GPU_PROJECTION_BAKE = isGpuBakeSupported()
+// Step 0 de-risk from the analysis: stop using the screen-space seam mask (the
+// source of the colour leak and the white-gradient bleed at silhouettes). Set this
+// back to true only to restore the legacy seam-fade behaviour for comparison.
+const PROJECTION_USE_SCREEN_SEAM_MASK = false
 
 function drawProjectionCheckerboard(context, width, height) {
   if (!context || !width || !height) {
@@ -547,103 +562,99 @@ function resolveProjectionSharedSeams(outputData, seamAccumColor, seamAccumWeigh
   }
 }
 
+// Ordered-ownership composite. Layers are applied IN ORDER (layer 0 = the first
+// projection the user applied). Each layer:
+//   • fully paints texels nothing has covered yet (gap fill — so no face the view
+//     touches is left untextured and nothing ever "untextures");
+//   • does NOT repaint the interior of a region an earlier layer already owns
+//     (so later views never change already-textured faces);
+//   • blends only within `blendPixels` of the already-owned boundary (the seam),
+//     so the "Blend overlap" slider widens the cross-fade WITHOUT removing coverage.
+// This matches the intent: front view owns what it sees; the next view fills the
+// rest and feathers across the join.
 function resolveProjectionLayersIntoImageData(outputData, layerSnapshots, width, height) {
   if (!outputData || !Array.isArray(layerSnapshots) || layerSnapshots.length === 0 || !width || !height) {
     return
   }
 
   const pixelCount = width * height
+  const committed = new Uint8Array(pixelCount) // texels owned by already-processed layers
+  // How strongly a later view may blend into an owned seam texel (at the very
+  // border). Ramps to 0 `blendPixels` inside the owned region.
+  const SEAM_MAX = 0.7
 
-  for (let i = 0; i < pixelCount; i += 1) {
-    const j = i * 4
-    const baseR = outputData[j]
-    const baseG = outputData[j + 1]
-    const baseB = outputData[j + 2]
+  for (let layerIndex = 0; layerIndex < layerSnapshots.length; layerIndex += 1) {
+    const layer = layerSnapshots[layerIndex]
+    if (!layer?.coverageMask || !layer?.pixelData) {
+      continue
+    }
+    const opacity = clamp01(layer.opacity ?? 1)
+    if (opacity <= 0) {
+      continue
+    }
 
-    let accumR = 0
-    let accumG = 0
-    let accumB = 0
-    let accumWeight = 0
-    let finalMaxOpacity = 0
+    const blendPx = Math.max(0, Number(layer.blendPixels) || 0)
+    // Distance INSIDE the currently-owned region (0 at its border, growing inward).
+    // Only needed once there is prior coverage and a seam blend is requested.
+    const ownedDist = (layerIndex > 0 && blendPx > 0)
+      ? computeProjectionDistanceInsideMask(committed, width, height)
+      : null
+    const denom = Math.max(1, blendPx * 10) // ORTHO step cost in the distance transform
 
-    for (let layerIndex = 0; layerIndex < layerSnapshots.length; layerIndex += 1) {
-      if (accumWeight >= 0.999) {
-        break // Fully occluded by previous layers' weighted color
-      }
-
-      const layer = layerSnapshots[layerIndex]
-      if (!layer?.coverageMask?.[i]) {
+    for (let i = 0; i < pixelCount; i += 1) {
+      if (!layer.coverageMask[i]) {
         continue
       }
-
+      const j = i * 4
       const srcAlpha = (layer.pixelData[j + 3] || 0) / 255
       if (srcAlpha <= 1e-4) {
         continue
       }
 
-      // At seam pixels (boundary zone of the projection), fade towards the
-      // underlying texture by scaling down this layer's effective opacity.
-      // opacitySeams = 1 keeps the previous behavior (opaque seams).
-      const seamFactor = layer.sharedSeamMask?.[i]
-        ? clamp01(layer.opacitySeams ?? 1)
-        : 1
-      const effectiveLayerOpacity = clamp01((layer.opacity ?? 1) * seamFactor)
-      const layerOpacity = clamp01(effectiveLayerOpacity * srcAlpha)
+      let influence
+      if (!committed[i]) {
+        // Unowned → this layer fills the gap completely. Quality does not reduce the
+        // fill: it is the only data available here, so paint it fully (no checker
+        // bleed, never untextured).
+        influence = opacity
+      } else if (ownedDist) {
+        // Owned by an earlier layer → keep the interior untouched; only blend within
+        // blendPixels of the owned border, scaled by how well THIS view sees it.
+        const dEdge = ownedDist[i]
+        const t = clamp01(1 - dEdge / denom) // 1 at the owned border → 0 blendPx inside
+        const conf = layer.confidenceMap?.[i] || 0
+        const smoothConf = conf * conf * (3 - 2 * conf)
+        influence = (t * t * (3 - 2 * t)) * smoothConf * opacity * SEAM_MAX
+      } else {
+        // Owned and no blend requested → strict lock, do not change.
+        influence = 0
+      }
 
-      // Use the pure 3D mathematically-derived confidence (based on facing angle and distance)
-      let conf = layer.confidenceMap?.[i] || 0
-
-      // A gentle curve to contrast the confidence slightly over the mesh curvature
-      const smoothConf = conf * conf * (3 - 2 * conf)
-
-      const mixWeight = smoothConf * layerOpacity
-      if (mixWeight <= 1e-4) {
+      if (influence <= 1e-4) {
         continue
       }
 
-      // Cascade priority: each layer gets the remaining unoccupied weight
-      const factor = mixWeight * (1 - accumWeight)
-      if (factor <= 1e-4) {
-        continue
-      }
-
-      // The baked canvas stores color * blend (effectively premultiplied by the mask weight).
-      // Divide by srcAlpha to recover the actual projection colour before blending.
+      // Recover straight colour. GPU bake stores straight colour with alpha 1; the
+      // CPU bake stores colour premultiplied by the mask weight, so divide it out.
       const invSrcAlpha = 1 / srcAlpha
       const srcR = Math.min(255, Math.round(layer.pixelData[j]     * invSrcAlpha))
       const srcG = Math.min(255, Math.round(layer.pixelData[j + 1] * invSrcAlpha))
       const srcB = Math.min(255, Math.round(layer.pixelData[j + 2] * invSrcAlpha))
-      const [blendR, blendG, blendB] = blendRgbByMode(layer.blendMode, baseR, baseG, baseB, srcR, srcG, srcB)
+      const [blendR, blendG, blendB] = blendRgbByMode(
+        layer.blendMode, outputData[j], outputData[j + 1], outputData[j + 2], srcR, srcG, srcB
+      )
 
-      accumR += blendR * factor
-      accumG += blendG * factor
-      accumB += blendB * factor
-      accumWeight += factor
-
-      // Any covered pixel must be fully opaque — using srcAlpha here caused
-      // the feathered mask edge to bleed the checkerboard through as a white
-      // gradient at projection silhouette boundaries.
-      finalMaxOpacity = Math.max(finalMaxOpacity, effectiveLayerOpacity)
+      outputData[j]     = Math.round(outputData[j]     * (1 - influence) + blendR * influence)
+      outputData[j + 1] = Math.round(outputData[j + 1] * (1 - influence) + blendG * influence)
+      outputData[j + 2] = Math.round(outputData[j + 2] * (1 - influence) + blendB * influence)
+      outputData[j + 3] = 255
     }
 
-    if (accumWeight > 0) {
-      // 1. Normalize the color by the accumulated weight.
-      // This mathematically eliminates the "white gradient" caused by overlapping soft seams
-      // because we re-normalize the color instead of letting the checkerboard bleed through the transparency.
-      const r = accumR / accumWeight
-      const g = accumG / accumWeight
-      const b = accumB / accumWeight
-
-      // 2. The final opacity against the checkerboard is simply the strongest 2D alpha.
-      // This guarantees that internal 3D-angle seams never become semi-transparent 
-      // (which is exactly what caused the white checkerboard bleeding).
-      const finalAlpha = Math.min(1.0, finalMaxOpacity)
-      const invAlpha = Math.max(0, 1 - finalAlpha)
-
-      outputData[j] = Math.round(baseR * invAlpha + r * finalAlpha)
-      outputData[j + 1] = Math.round(baseG * invAlpha + g * finalAlpha)
-      outputData[j + 2] = Math.round(baseB * invAlpha + b * finalAlpha)
-      outputData[j + 3] = 255
+    // Commit this layer's coverage so later layers treat it as owned.
+    for (let i = 0; i < pixelCount; i += 1) {
+      if (layer.coverageMask[i]) {
+        committed[i] = 1
+      }
     }
   }
 }
@@ -5942,6 +5953,66 @@ export default function MeshEditorPage() {
         let finalizeStats = null
 
         if (requiresRebake) {
+          let gpuBaked = false
+          // ── GPU UV-space bake (analysis Steps 1–3): depth-map occlusion +
+          //    parallel projective texturing. Hard-edged output (no UV feather,
+          //    no screen-space seam smear) → fixes occlusion, speed and the leak.
+          //    Slots straight into the existing layer composite below.
+          if (USE_GPU_PROJECTION_BAKE) {
+            try {
+              const maskCanvasGpu = createProjectionCropMaskCanvasFromPatch(patchCanvas, effectiveCropBorder)
+              const gpu = await bakeViewToTextureGPU({
+                root: texturableMesh.root,
+                textureKey: texturableMesh.textureKey,
+                textureConfig: texturableMesh.textureConfig,
+                camera: projectionCamera,
+                viewImage: patchCanvas,
+                maskImage: maskCanvasGpu,
+                textureWidth: texW,
+                textureHeight: texH,
+                // Steep cosine (α≈6, per the analysis) makes the best-facing view
+                // dominate, so a later view (e.g. top) does not contaminate texels a
+                // better-facing earlier view (e.g. front) already owns. The composite's
+                // border feather still gives a smooth cross-fade where two views see a
+                // surface equally well. minFacing rejects extreme-grazing texels (where
+                // the projector only samples its silhouette/background → black matte
+                // lines) so they never enter this view's coverage.
+                alpha: 6,
+                viewOpacity: 1,
+                cullBackfaces: false,
+                minFacing: 0.12,
+                minMaskAlpha: 0.12
+              })
+              if (projectionRebuildTokenRef.current !== rebuildToken) {
+                return
+              }
+              if (gpu && gpu.canvas) {
+                const coverageMask = gpu.coverageMask
+                const ownershipMask = new Uint8Array(texW * texH)
+                for (let i = 0; i < ownershipMask.length; i += 1) {
+                  // Mirror the CPU minAlpha:112 'confident core' using GPU cosine
+                  // confidence (0.44 ≈ 112/255).
+                  ownershipMask[i] = gpu.confidenceMap[i] >= 0.44 ? 1 : 0
+                }
+                const sharedSeamMask = new Uint8Array(texW * texH) // Step 0: empty
+                layerData.bakedCanvas = gpu.canvas
+                layerData.bakeSignature = bakeSignature
+                layerData.coverageMask = coverageMask
+                layerData.ownershipMask = ownershipMask
+                layerData.sharedSeamMask = sharedSeamMask
+                layerData.confidenceMap = gpu.confidenceMap
+                accumulateStats = { occlusionModeUsed: `gpu:${gpu.occlusionModeUsed}`, appliedSamples: gpu.coveredTexels || 0 }
+                finalizeStats = { appliedPixels: 0 }
+                gpuBaked = true
+              }
+            } catch (gpuErr) {
+              if (typeof console !== 'undefined') {
+                console.warn('[Projection] GPU bake failed, using CPU fallback:', gpuErr)
+              }
+            }
+          }
+
+          if (!gpuBaked) {
           const maskCanvas = createProjectionCropMaskCanvasFromPatch(patchCanvas, effectiveCropBorder)
           const accumulatedColor = new Float32Array(texW * texH * 4)
           const accumulatedWeight = new Float32Array(texW * texH)
@@ -6026,7 +6097,7 @@ export default function MeshEditorPage() {
           // after gap-fill / edge-bleed.
           const viewSeamMask = accumulateStats?.viewSeamMask
           const sharedSeamMask = new Uint8Array(texW * texH)
-          if (viewSeamMask && viewSeamMask.length === texW * texH) {
+          if (PROJECTION_USE_SCREEN_SEAM_MASK && viewSeamMask && viewSeamMask.length === texW * texH) {
             for (let i = 0; i < sharedSeamMask.length; i += 1) {
               if (coverageMask[i] && viewSeamMask[i]) {
                 sharedSeamMask[i] = 1
@@ -6041,6 +6112,7 @@ export default function MeshEditorPage() {
           layerData.ownershipMask = ownershipMask
           layerData.sharedSeamMask = sharedSeamMask
           layerData.confidenceMap = confidenceMap
+          }
         }
 
         if (projectionRebuildTokenRef.current !== rebuildToken) {
@@ -6850,6 +6922,41 @@ export default function MeshEditorPage() {
           patchCanvas: viewPatchCanvas
         });
 
+        // GPU fast path: replace the per-texel CPU raycast bake with the GPU
+        // UV-space bake (depth-map occlusion). viewPatchCanvas already holds the
+        // base texture, so the hard-edged, covered-only GPU result is drawn over it
+        // — matching finalizeProjectedPatch's project-over-base behaviour.
+        let viewGpuBaked = false
+        if (USE_GPU_PROJECTION_BAKE) {
+          try {
+            const gpu = await bakeViewToTextureGPU({
+              root: texturableMesh.root,
+              textureKey: texturableMesh.textureKey,
+              textureConfig: texturableMesh.textureConfig,
+              camera: viewCamera,
+              viewImage: patchImage,
+              maskImage: viewScreenMask,
+              textureWidth,
+              textureHeight,
+              alpha: 6,
+              viewOpacity: 1,
+              cullBackfaces: false,
+              minFacing: 0.12,
+              minMaskAlpha: 0.12
+            });
+            if (gpu && gpu.canvas) {
+              setFeedback(`Reprojecting${viewLabel}… 100%`);
+              viewPatchContext.drawImage(gpu.canvas, 0, 0);
+              viewGpuBaked = true;
+            }
+          } catch (gpuErr) {
+            if (typeof console !== 'undefined') {
+              console.warn('[Projection] GPU reproject failed, using CPU fallback:', gpuErr);
+            }
+          }
+        }
+
+        if (!viewGpuBaked) {
         await accumulateProjectedPatch({
           root: texturableMesh.root,
           textureKey: texturableMesh.textureKey,
@@ -6874,6 +6981,7 @@ export default function MeshEditorPage() {
           accumulatedColor: viewAccumulatedColor,
           accumulatedWeight: viewAccumulatedWeight
         });
+        }
 
         anyViewApplied = true;
       }

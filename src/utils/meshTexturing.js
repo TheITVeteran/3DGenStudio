@@ -1658,7 +1658,7 @@ export async function accumulateProjectedPatch({
   faceLockPolicy = 'none',
   faceLockCoverageThreshold = 0.7,
   faceLockFacingThreshold = 0.45,
-  occlusionMode = 'raycast',
+  occlusionMode = 'auto', // Step 1 (analysis): depth-prepass by default; was 'raycast'
   cullBackfaces = true
 }) {
   if (!root || !camera || !maskCanvas || !bbox || !patchImage || !accumulatedColor || !accumulatedWeight) {
