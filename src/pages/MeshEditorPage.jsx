@@ -56,7 +56,8 @@ import {
 import {
   bakeViewToTextureGPU,
   bakeMultiViewTextureGPU,
-  isGpuBakeSupported
+  isGpuBakeSupported,
+  solveViewGains
 } from '../utils/gpuTextureBake'
 import {
   applyBrushTextureWeights as applySculptBrushTextureWeights,
@@ -572,15 +573,15 @@ function resolveProjectionSharedSeams(outputData, seamAccumColor, seamAccumWeigh
 //     so the "Blend overlap" slider widens the cross-fade WITHOUT removing coverage.
 // This matches the intent: front view owns what it sees; the next view fills the
 // rest and feathers across the join.
-function resolveProjectionLayersIntoImageData(outputData, layerSnapshots, width, height) {
+function resolveProjectionLayersIntoImageData(outputData, layerSnapshots, width, height, viewGains = null) {
   if (!outputData || !Array.isArray(layerSnapshots) || layerSnapshots.length === 0 || !width || !height) {
     return
   }
 
   const pixelCount = width * height
   const committed = new Uint8Array(pixelCount) // texels owned by already-processed layers
-  // How strongly a later view may blend into an owned seam texel (at the very
-  // border). Ramps to 0 `blendPixels` inside the owned region.
+  // Base strength a later view blends into an owned seam texel at the very border;
+  // ramps to 0 `blendPixels` inside. Scaled per layer by its "Opacity seams" knob.
   const SEAM_MAX = 0.7
 
   for (let layerIndex = 0; layerIndex < layerSnapshots.length; layerIndex += 1) {
@@ -593,10 +594,21 @@ function resolveProjectionLayersIntoImageData(outputData, layerSnapshots, width,
       continue
     }
 
+    // "Opacity seams" now controls how strongly this view blends across an already
+    // -owned border: 1 = full seam cross-fade, 0 = hard ownership edge (no blend).
+    const seamMax = SEAM_MAX * clamp01(layer.opacitySeams ?? 1)
+    // Per-view colour gain (Brown–Lowe) to match this view's overall tone to the
+    // others before blending — collapses photometric seams between views ComfyUI
+    // coloured differently. Identity when compensation is off / single layer.
+    const gain = viewGains?.[layerIndex] || null
+    const gainR = gain ? gain[0] : 1
+    const gainG = gain ? gain[1] : 1
+    const gainB = gain ? gain[2] : 1
+
     const blendPx = Math.max(0, Number(layer.blendPixels) || 0)
     // Distance INSIDE the currently-owned region (0 at its border, growing inward).
     // Only needed once there is prior coverage and a seam blend is requested.
-    const ownedDist = (layerIndex > 0 && blendPx > 0)
+    const ownedDist = (layerIndex > 0 && blendPx > 0 && seamMax > 0)
       ? computeProjectionDistanceInsideMask(committed, width, height)
       : null
     const denom = Math.max(1, blendPx * 10) // ORTHO step cost in the distance transform
@@ -624,7 +636,7 @@ function resolveProjectionLayersIntoImageData(outputData, layerSnapshots, width,
         const t = clamp01(1 - dEdge / denom) // 1 at the owned border → 0 blendPx inside
         const conf = layer.confidenceMap?.[i] || 0
         const smoothConf = conf * conf * (3 - 2 * conf)
-        influence = (t * t * (3 - 2 * t)) * smoothConf * opacity * SEAM_MAX
+        influence = (t * t * (3 - 2 * t)) * smoothConf * opacity * seamMax
       } else {
         // Owned and no blend requested → strict lock, do not change.
         influence = 0
@@ -636,10 +648,11 @@ function resolveProjectionLayersIntoImageData(outputData, layerSnapshots, width,
 
       // Recover straight colour. GPU bake stores straight colour with alpha 1; the
       // CPU bake stores colour premultiplied by the mask weight, so divide it out.
+      // Then apply the per-view gain so this view's tone matches the others.
       const invSrcAlpha = 1 / srcAlpha
-      const srcR = Math.min(255, Math.round(layer.pixelData[j]     * invSrcAlpha))
-      const srcG = Math.min(255, Math.round(layer.pixelData[j + 1] * invSrcAlpha))
-      const srcB = Math.min(255, Math.round(layer.pixelData[j + 2] * invSrcAlpha))
+      const srcR = Math.min(255, Math.round(layer.pixelData[j]     * invSrcAlpha * gainR))
+      const srcG = Math.min(255, Math.round(layer.pixelData[j + 1] * invSrcAlpha * gainG))
+      const srcB = Math.min(255, Math.round(layer.pixelData[j + 2] * invSrcAlpha * gainB))
       const [blendR, blendG, blendB] = blendRgbByMode(
         layer.blendMode, outputData[j], outputData[j + 1], outputData[j + 2], srcR, srcG, srcB
       )
@@ -6164,7 +6177,46 @@ export default function MeshEditorPage() {
         return
       }
 
-      resolveProjectionLayersIntoImageData(composedData, layerSnapshots, texW, texH)
+      // Per-view gain compensation (Brown–Lowe): align each projection's overall
+      // tone to the others using their overlap colours, so views ComfyUI generated
+      // with different lighting/tint don't leave a visible colour step at the seam.
+      // Solved across all visible layers; identity for a single layer.
+      let viewGains = null
+      if (layerSnapshots.length > 1) {
+        try {
+          viewGains = solveViewGains(
+            layerSnapshots.map(l => l.pixelData),
+            layerSnapshots.map(l => l.coverageMask),
+            texW,
+            texH
+          )
+          // Gain compensation only equalises the views UP TO A GLOBAL SCALE — the
+          // shared brightness target is pinned only by a weak prior, so adding a
+          // darker view can drag every gain below 1 and darken the whole mesh.
+          // Anchor the reference: pin layer 0 (the owner) to gain 1 and express the
+          // rest relative to it, so the owner keeps its brightness and the scale
+          // cannot drift. Re-clamp to keep a single view from blowing out.
+          if (viewGains && viewGains.length > 1) {
+            const ref = viewGains[0]
+            for (let ch = 0; ch < 3; ch += 1) {
+              const r = ref[ch]
+              if (Math.abs(r) <= 1e-3) {
+                continue
+              }
+              for (let k = 0; k < viewGains.length; k += 1) {
+                viewGains[k][ch] = Math.max(0.5, Math.min(2.0, viewGains[k][ch] / r))
+              }
+            }
+          }
+        } catch (gainErr) {
+          if (typeof console !== 'undefined') {
+            console.warn('[Projection] gain compensation failed, using identity:', gainErr)
+          }
+          viewGains = null
+        }
+      }
+
+      resolveProjectionLayersIntoImageData(composedData, layerSnapshots, texW, texH, viewGains)
       textureContext.putImageData(composedImage, 0, 0)
       projectionLayerSnapshotsRef.current = layerSnapshots
       postProcBackupRef.current = null  // invalidate any prior post-proc backup on rebuild
