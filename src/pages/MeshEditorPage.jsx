@@ -563,6 +563,77 @@ function resolveProjectionSharedSeams(outputData, seamAccumColor, seamAccumWeigh
   }
 }
 
+// Final-composite gutter padding. After the ownership composite resolves every
+// covered texel, bleed those colours a few texels past each covered island edge
+// into the still-uncovered base. The display texture uses LinearFilter with no
+// mipmaps, so sampling reaches ~0.5 texel beyond a UV-island border at a seam;
+// without padding it pulls the unpainted (white) base in, producing the thin
+// white "wireframe" seams. The per-layer GPU dilation only seeds from head-on
+// coverage (DILATE_SEED_MIN_WEIGHT, to avoid a multi-view gray seam), so it
+// leaves grazing-but-covered islands' gutters white — this pass is ungated and
+// fills them. It runs on the FINAL composite (colours already resolved by
+// ownership), so it can never recreate that cross-view gray seam.
+const PROJECTION_GUTTER_PAD_PX = 4
+function dilateProjectionGutter(outputData, coverage, width, height, radius = PROJECTION_GUTTER_PAD_PX) {
+  if (!outputData || !coverage || !width || !height) {
+    return
+  }
+  const passes = Math.max(1, Math.floor(radius))
+  const grown = Uint8Array.from(coverage)
+  for (let pass = 0; pass < passes; pass += 1) {
+    const src = Uint8Array.from(grown)
+    let changed = false
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const i = y * width + x
+        if (src[i]) {
+          continue
+        }
+        let sumR = 0
+        let sumG = 0
+        let sumB = 0
+        let count = 0
+        for (let dy = -1; dy <= 1; dy += 1) {
+          const ny = y + dy
+          if (ny < 0 || ny >= height) {
+            continue
+          }
+          for (let dx = -1; dx <= 1; dx += 1) {
+            if (dx === 0 && dy === 0) {
+              continue
+            }
+            const nx = x + dx
+            if (nx < 0 || nx >= width) {
+              continue
+            }
+            const ni = ny * width + nx
+            if (!src[ni]) {
+              continue
+            }
+            const no = ni * 4
+            sumR += outputData[no]
+            sumG += outputData[no + 1]
+            sumB += outputData[no + 2]
+            count += 1
+          }
+        }
+        if (count > 0) {
+          const o = i * 4
+          outputData[o] = Math.round(sumR / count)
+          outputData[o + 1] = Math.round(sumG / count)
+          outputData[o + 2] = Math.round(sumB / count)
+          outputData[o + 3] = 255
+          grown[i] = 1
+          changed = true
+        }
+      }
+    }
+    if (!changed) {
+      break
+    }
+  }
+}
+
 // Ordered-ownership composite. Layers are applied IN ORDER (layer 0 = the first
 // projection the user applied). Each layer:
 //   • fully paints texels nothing has covered yet (gap fill — so no face the view
@@ -677,6 +748,11 @@ function resolveProjectionLayersIntoImageData(outputData, layerSnapshots, width,
       }
     }
   }
+
+  // Pad the resolved colours past every covered island edge so display-time
+  // bilinear sampling cannot pull the unpainted base across UV seams (the thin
+  // white "wireframe" lines).
+  dilateProjectionGutter(outputData, committed, width, height)
 }
 
 async function applySeamPostProcessing(textureCanvas, layerSnapshots, seamThreshold, blurRadius, strength) {
