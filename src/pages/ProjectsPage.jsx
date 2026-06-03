@@ -21,6 +21,18 @@ const STATUS_MAP = {
 
 const CHANGE_LOG_ENTRIES = [
   {
+    version: 'v1.0.1',
+    date: '2026-06-03',
+    items: [
+			'Mesh Editor - Projection Mode: Moved processing to GPU',
+			'Mesh Editor - Projection Mode: Improved seams',
+			'Graph page: Text node can generate text with ComfyUI',
+			'Graph page: Fixed name of the generated image',
+			'Setup Wizard: Added Flux2Dev and Flux2Klein9B',
+			'Image Editor: Added ComfyUI mode in AI'
+    ],
+  },
+  {
     version: 'v1.0.0',
     date: '2026-05-29',
     items: [
