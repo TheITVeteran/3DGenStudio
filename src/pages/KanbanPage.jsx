@@ -11,141 +11,39 @@ import SettingsModal from '../components/SettingsModal'
 import { createMeshThumbnailFile } from '../utils/meshThumbnail'
 import './KanbanPage.css'
 import AssetSelectorModal from '../components/AssetSelectorModal';
-
-const IMAGE_API_LIST = [
-  { id: 'nanobana', name: 'Nanobana' },
-  { id: 'nanobana_pro', name: 'Nanobana Pro' },
-  { id: 'nanobana_2', name: 'Nanobana 2' },
-  { id: 'openai_gpt_image_1', name: 'OpenAI · gpt-image-1' },
-  { id: 'openai_gpt_image_1_5', name: 'OpenAI · gpt-image-1.5' },
-]
-const TENCENT_MESH_GENERATION_API_ID = 'tencent_meshgeneration'
-const TRIPO_MESH_GENERATION_API_ID = 'tripo_meshgeneration'
-const TENCENT_MESH_API_OPTION = { id: TENCENT_MESH_GENERATION_API_ID, name: 'Tencent Cloud · Hunyuan3D Pro' }
-const TRIPO_MESH_API_OPTION = { id: TRIPO_MESH_GENERATION_API_ID, name: 'Tripo AI' }
-const TENCENT_REGION_OPTIONS = ['ap-singapore', 'eu-frankfurt', 'na-siliconvalley']
-const TENCENT_MODEL_VERSION_OPTIONS = ['3.0', '3.1']
-const TENCENT_GENERATION_TYPE_OPTIONS = ['Normal', 'LowPoly', 'Geometry']
-const TENCENT_POLYGON_TYPE_OPTIONS = ['triangle', 'quadrilaterial']
-const TRIPO_MODEL_VERSION_OPTIONS = ['v2.0-20240919', 'v2.5-20250123', 'v3.0-20250812', 'v3.1-20260211', 'Turbo-v1.0-20250506', 'P1-20260311']
-const TRIPO_TEXTURE_ALIGNMENT_OPTIONS = ['original_image', 'geometry']
-const TRIPO_TEXTURE_QUALITY_OPTIONS = ['standard', 'detailed']
-const TRIPO_ORIENTATION_OPTIONS = ['default', 'align_image']
-const TRIPO_GEOMETRY_QUALITY_OPTIONS = ['standard', 'detailed']
-
-const IMAGE_CARD_COLUMNS = [
-  { id: 'images', dbId: 1, icon: 'image', title: 'IMAGES' },
-  { id: 'imageedit', dbId: 2, icon: 'photo_filter', title: 'IMAGE EDIT', showAttributes: true, emptyLabel: 'Drag an image card here to edit it' },
-  { id: 'meshgen', dbId: 3, icon: 'deployed_code', title: 'MESH GEN', showAttributes: true, emptyLabel: 'Drag an image card here to generate a mesh' },
-  { id: 'meshedit', dbId: 4, icon: 'edit_square', title: 'MESH EDIT', showAttributes: true, emptyLabel: 'Drag a mesh card here to edit it' },
-  { id: 'texturing', dbId: 5, icon: 'texture', title: 'TEXTURING', showAttributes: true, emptyLabel: 'Drag a mesh card here to texture it' },
-]
-
-const DEFAULT_ATTRIBUTE_TYPE_ID = 1
-const DEFAULT_CUSTOM_API_TYPE = 'image-generation'
-
-function isFileWorkflowValueType(valueType) {
-  return ['image', 'video', 'mesh'].includes(valueType)
-}
-
-function getWorkflowFileInputAccept(valueType) {
-  if (valueType === 'video') return 'video/*'
-  if (valueType === 'mesh') return '.glb,.gltf,.obj,.fbx,.stl,.ply,.usdz,.usd,.usda,.usdc'
-  return 'image/*'
-}
-
-function getWorkflowFileInputIcon(valueType) {
-  if (valueType === 'video') return 'video_file'
-  if (valueType === 'mesh') return 'deployed_code'
-  return 'image'
-}
-
-function normalizeCustomApiType(type) {
-  return ['image-generation', 'image-edit', 'mesh-generation', 'mesh-edit', 'mesh-texturing'].includes(type)
-    ? type
-    : DEFAULT_CUSTOM_API_TYPE
-}
-
-function isTencentMeshGenerationApi(selectedApi = '') {
-  return String(selectedApi || '').trim() === TENCENT_MESH_GENERATION_API_ID
-}
-
-function isTripoMeshGenerationApi(selectedApi = '') {
-  return String(selectedApi || '').trim() === TRIPO_MESH_GENERATION_API_ID
-}
-
-function canFetchTencentMeshResult(runtimeState) {
-  return runtimeState?.source === 'Tencent Cloud'
-    && runtimeState?.status === 'processing'
-    && ['RUN', 'WAIT'].includes(String(runtimeState?.jobStatus || '').toUpperCase())
-    && runtimeState?.jobId
-    && runtimeState?.region
-}
-
-function canFetchTripoMeshResult(runtimeState) {
-  return runtimeState?.source === 'Tripo AI'
-    && runtimeState?.status === 'processing'
-    && ['queued', 'running'].includes(String(runtimeState?.taskStatus || '').toLowerCase())
-    && runtimeState?.taskId
-}
-
-function getComfyDraftFromWorkflow(workflow) {
-  return {
-    mode: 'comfy',
-    workflowId: workflow?.id || '',
-    inputs: Object.fromEntries(
-      (workflow?.parameters || []).map(parameter => {
-        const valueType = getWorkflowParameterValueType(parameter)
-        return [parameter.id, isFileWorkflowValueType(valueType) ? null : (valueType === 'boolean' ? Boolean(parameter.defaultValue ?? false) : (parameter.defaultValue ?? ''))]
-      })
-    )
-  }
-}
-
-function formatWorkflowDefaultValue(value) {
-  if (value === null || value === undefined || value === '') return 'empty'
-  if (typeof value === 'object') return JSON.stringify(value)
-  return String(value)
-}
-
-function getWorkflowParameterValueType(parameter) {
-  if (parameter?.valueType) return parameter.valueType
-  if (parameter?.type === 'boolean') return 'boolean'
-  return parameter?.type === 'number' ? 'number' : 'string'
-}
-
-function getAssetChildren(asset) {
-  return asset?.children || asset?.edits || []
-}
-
-function createImageCardId() {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID()
-  }
-
-  return `image-card-${Date.now()}-${Math.round(Math.random() * 1E9)}`
-}
-
-function createComfyExecutionId(prefix = 'comfy') {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID()
-  }
-
-  return `${prefix}-${Date.now()}-${Math.round(Math.random() * 1E9)}`
-}
-
-function buildMeshEditorPath(asset, projectId, returnTo) {
-  const query = new URLSearchParams({
-    assetId: String(asset?.id || ''),
-    filePath: asset?.filePath || asset?.filename || '',
-    url: asset?.filename ? `http://localhost:3001/assets/${encodeURI(asset.filename)}` : '',
-    name: asset?.name || 'Mesh',
-    projectId: projectId ? String(projectId) : '',
-    returnTo: returnTo || ''
-  })
-
-  return `/mesh-editor?${query.toString()}`
-}
+import {
+  DEFAULT_ATTRIBUTE_TYPE_ID,
+  IMAGE_API_LIST,
+  IMAGE_CARD_COLUMNS,
+  TENCENT_GENERATION_TYPE_OPTIONS,
+  TENCENT_MESH_API_OPTION,
+  TENCENT_MESH_GENERATION_API_ID,
+  TENCENT_MODEL_VERSION_OPTIONS,
+  TENCENT_POLYGON_TYPE_OPTIONS,
+  TENCENT_REGION_OPTIONS,
+  TRIPO_GEOMETRY_QUALITY_OPTIONS,
+  TRIPO_MESH_API_OPTION,
+  TRIPO_MESH_GENERATION_API_ID,
+  TRIPO_MODEL_VERSION_OPTIONS,
+  TRIPO_ORIENTATION_OPTIONS,
+  TRIPO_TEXTURE_ALIGNMENT_OPTIONS,
+  TRIPO_TEXTURE_QUALITY_OPTIONS,
+  buildMeshEditorPath,
+  canFetchTencentMeshResult,
+  canFetchTripoMeshResult,
+  createComfyExecutionId,
+  createImageCardId,
+  formatWorkflowDefaultValue,
+  getAssetChildren,
+  getComfyDraftFromWorkflow,
+  getWorkflowFileInputAccept,
+  getWorkflowFileInputIcon,
+  getWorkflowParameterValueType,
+  isFileWorkflowValueType,
+  isTencentMeshGenerationApi,
+  isTripoMeshGenerationApi,
+  normalizeCustomApiType
+} from '../utils/kanbanHelpers'
 
 export default function KanbanPage() {
   const { projectId } = useParams()
