@@ -8,33 +8,32 @@ import { useProjects } from '../context/ProjectContext'
 import { useNotifications } from '../context/NotificationContext'
 import { buildAssetUrl, createExecutionId } from '../utils/meshTexturing'
 import { applyShadowRemoverToCanvas, disposeShadowRemoverRenderer } from '../utils/shadowRemoverGPU'
+import {
+  applyAdjustmentsToCanvas,
+  applyBlurSharpenToCanvas,
+  canvasToPngFile,
+  clamp,
+  createComfyMaskCanvas,
+  createLayerId,
+  cropCanvas,
+  getMaskBoundingBox,
+  getValueType,
+  loadImageToCanvas,
+  normalizeWorkflowResult
+} from '../utils/imageEditorCanvas'
+import ImageEditorToolbar from '../components/imageEditor/ImageEditorToolbar'
+import ToolSidebar from '../components/imageEditor/ToolSidebar'
+import LayersPanel from '../components/imageEditor/LayersPanel'
+import CropControls from '../components/imageEditor/controls/CropControls'
+import ResizeControls from '../components/imageEditor/controls/ResizeControls'
+import AdjustControls from '../components/imageEditor/controls/AdjustControls'
+import FilterControls from '../components/imageEditor/controls/FilterControls'
+import ShadowRemoverControls from '../components/imageEditor/controls/ShadowRemoverControls'
+import PaintControls from '../components/imageEditor/controls/PaintControls'
+import ComfyUIFullControls from '../components/imageEditor/controls/ComfyUIFullControls'
+import ComfyUIMaskControls from '../components/imageEditor/controls/ComfyUIMaskControls'
+import useImageEditorHistory from '../hooks/useImageEditorHistory'
 import './ImageEditorPage.css'
-
-const PAINT_BLEND_MODES = [
-  { value: 'source-over', label: 'Normal' },
-  { value: 'multiply', label: 'Multiply' },
-  { value: 'screen', label: 'Screen' },
-  { value: 'overlay', label: 'Overlay' },
-  { value: 'darken', label: 'Darken' },
-  { value: 'lighten', label: 'Lighten' }
-]
-
-const TOOLS = {
-  edit: [
-    { id: 'crop', label: 'Crop', icon: 'crop' },
-    { id: 'resize', label: 'Resize', icon: 'open_in_full' },
-    { id: 'adjust', label: 'Levels / Contrast / Saturation', icon: 'tune' },
-    { id: 'filters', label: 'Blur / Sharpen', icon: 'blur_on' },
-    { id: 'shadow-remover', label: 'Shadow Remover', icon: 'light_mode' }
-  ],
-  paint: [
-    { id: 'paint', label: 'Brush / Image Brush', icon: 'brush' }
-  ],
-  ai: [
-    { id: 'mask', label: 'Mask + ComfyUI', icon: 'auto_fix_high' },
-    { id: 'comfyui', label: 'ComfyUI', icon: 'auto_awesome' }
-  ]
-}
 
 const DEFAULT_ADJUST_VALUES = { blackPoint: 0, whitePoint: 255, contrast: 0, saturation: 0 }
 const DEFAULT_FILTER_VALUES = { blur: 0, sharpen: 0 }
@@ -42,249 +41,6 @@ const DEFAULT_SHADOW_REMOVER_VALUES = { strength: 40, threshold: 32, softness: 1
 const MIN_ZOOM = 0.25
 const MAX_ZOOM = 8
 const ZOOM_STEP = 1.15
-
-function createLayerId() {
-  return `image-layer-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-}
-
-function clamp(value, min, max) {
-  return Math.min(max, Math.max(min, value))
-}
-
-function cloneCanvasElement(sourceCanvas) {
-  if (!sourceCanvas) return null
-  const cloned = document.createElement('canvas')
-  cloned.width = sourceCanvas.width
-  cloned.height = sourceCanvas.height
-  cloned.getContext('2d').drawImage(sourceCanvas, 0, 0)
-  return cloned
-}
-
-function applyAdjustmentsToCanvas(sourceCanvas, settings) {
-  const outputCanvas = cloneCanvasElement(sourceCanvas)
-  if (!outputCanvas) return null
-
-  const context = outputCanvas.getContext('2d')
-  const imageData = context.getImageData(0, 0, outputCanvas.width, outputCanvas.height)
-  const data = imageData.data
-
-  const black = clamp(settings.blackPoint, 0, 254)
-  const white = clamp(settings.whitePoint, black + 1, 255)
-  const contrastFactor = (259 * (settings.contrast + 255)) / (255 * (259 - settings.contrast))
-  const saturationFactor = 1 + settings.saturation / 100
-
-  for (let index = 0; index < data.length; index += 4) {
-    let red = data[index]
-    let green = data[index + 1]
-    let blue = data[index + 2]
-
-    red = clamp(((red - black) * 255) / (white - black), 0, 255)
-    green = clamp(((green - black) * 255) / (white - black), 0, 255)
-    blue = clamp(((blue - black) * 255) / (white - black), 0, 255)
-
-    red = clamp(contrastFactor * (red - 128) + 128, 0, 255)
-    green = clamp(contrastFactor * (green - 128) + 128, 0, 255)
-    blue = clamp(contrastFactor * (blue - 128) + 128, 0, 255)
-
-    const gray = red * 0.299 + green * 0.587 + blue * 0.114
-    red = clamp(gray + (red - gray) * saturationFactor, 0, 255)
-    green = clamp(gray + (green - gray) * saturationFactor, 0, 255)
-    blue = clamp(gray + (blue - gray) * saturationFactor, 0, 255)
-
-    data[index] = red
-    data[index + 1] = green
-    data[index + 2] = blue
-  }
-
-  context.putImageData(imageData, 0, 0)
-  return outputCanvas
-}
-
-function applyBlurSharpenToCanvas(sourceCanvas, settings) {
-  const outputCanvas = cloneCanvasElement(sourceCanvas)
-  if (!outputCanvas) return null
-
-  const context = outputCanvas.getContext('2d')
-
-  if (settings.blur > 0) {
-    const blurredSource = cloneCanvasElement(outputCanvas)
-    context.clearRect(0, 0, outputCanvas.width, outputCanvas.height)
-    context.filter = `blur(${settings.blur}px)`
-    context.drawImage(blurredSource, 0, 0)
-    context.filter = 'none'
-  }
-
-  if (settings.sharpen > 0) {
-    const sourceData = context.getImageData(0, 0, outputCanvas.width, outputCanvas.height)
-    const output = context.createImageData(outputCanvas.width, outputCanvas.height)
-    const input = sourceData.data
-    const out = output.data
-    const width = outputCanvas.width
-    const height = outputCanvas.height
-    const amount = clamp(settings.sharpen / 100, 0, 1.5)
-
-    const kernel = [
-      0, -1, 0,
-      -1, 5 + amount * 2.5, -1,
-      0, -1, 0
-    ]
-
-    for (let y = 0; y < height; y += 1) {
-      for (let x = 0; x < width; x += 1) {
-        const index = (y * width + x) * 4
-
-        let red = 0
-        let green = 0
-        let blue = 0
-
-        let kernelIndex = 0
-        for (let ky = -1; ky <= 1; ky += 1) {
-          for (let kx = -1; kx <= 1; kx += 1) {
-            const sampleX = clamp(x + kx, 0, width - 1)
-            const sampleY = clamp(y + ky, 0, height - 1)
-            const sampleIndex = (sampleY * width + sampleX) * 4
-            const weight = kernel[kernelIndex]
-            red += input[sampleIndex] * weight
-            green += input[sampleIndex + 1] * weight
-            blue += input[sampleIndex + 2] * weight
-            kernelIndex += 1
-          }
-        }
-
-        out[index] = clamp(red, 0, 255)
-        out[index + 1] = clamp(green, 0, 255)
-        out[index + 2] = clamp(blue, 0, 255)
-        out[index + 3] = input[index + 3]
-      }
-    }
-
-    context.putImageData(output, 0, 0)
-  }
-
-  return outputCanvas
-}
-
-function getValueType(parameter) {
-  if (parameter?.valueType) return parameter.valueType
-  if (parameter?.type === 'number') return 'number'
-  if (parameter?.type === 'boolean') return 'boolean'
-  return 'string'
-}
-
-function normalizeWorkflowResult(result) {
-  const list = Array.isArray(result) ? result : [result]
-  const imageAsset = list.find(item => item?.type === 'image') || list[0]
-  return imageAsset || null
-}
-
-async function loadImageToCanvas(url, width, height) {
-  const response = await fetch(url)
-  if (!response.ok) {
-    throw new Error(`Failed to load image (${response.status})`)
-  }
-
-  const blob = await response.blob()
-  const objectUrl = URL.createObjectURL(blob)
-
-  try {
-    const image = new Image()
-    await new Promise((resolve, reject) => {
-      image.onload = resolve
-      image.onerror = () => reject(new Error('Failed to decode image'))
-      image.src = objectUrl
-    })
-
-    const canvas = document.createElement('canvas')
-    canvas.width = width || image.naturalWidth || image.width
-    canvas.height = height || image.naturalHeight || image.height
-    canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height)
-    return canvas
-  } finally {
-    URL.revokeObjectURL(objectUrl)
-  }
-}
-
-async function canvasToPngFile(canvas, filename) {
-  const blob = await new Promise((resolve, reject) => {
-    canvas.toBlob(nextBlob => {
-      if (!nextBlob) {
-        reject(new Error('Failed to encode image as PNG'))
-        return
-      }
-      resolve(nextBlob)
-    }, 'image/png')
-  })
-
-  return new File([blob], filename, { type: 'image/png' })
-}
-
-function getMaskBoundingBox(canvas, padding = 0) {
-  if (!canvas?.width || !canvas?.height) return null
-  const imageData = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data
-
-  let minX = canvas.width
-  let minY = canvas.height
-  let maxX = -1
-  let maxY = -1
-
-  for (let y = 0; y < canvas.height; y += 1) {
-    for (let x = 0; x < canvas.width; x += 1) {
-      const index = (y * canvas.width + x) * 4 + 3
-      if (imageData[index] <= 0) continue
-      if (x < minX) minX = x
-      if (y < minY) minY = y
-      if (x > maxX) maxX = x
-      if (y > maxY) maxY = y
-    }
-  }
-
-  if (maxX < 0 || maxY < 0) return null
-
-  return {
-    left: clamp(Math.floor(minX - padding), 0, canvas.width - 1),
-    top: clamp(Math.floor(minY - padding), 0, canvas.height - 1),
-    right: clamp(Math.ceil(maxX + padding), 0, canvas.width - 1),
-    bottom: clamp(Math.ceil(maxY + padding), 0, canvas.height - 1)
-  }
-}
-
-function cropCanvas(canvas, bounds) {
-  if (!canvas || !bounds) return null
-  const width = Math.max(1, bounds.right - bounds.left + 1)
-  const height = Math.max(1, bounds.bottom - bounds.top + 1)
-  const cropped = document.createElement('canvas')
-  cropped.width = width
-  cropped.height = height
-  cropped.getContext('2d').drawImage(canvas, bounds.left, bounds.top, width, height, 0, 0, width, height)
-  return cropped
-}
-
-function createComfyMaskCanvas(sourceMaskCanvas, bounds = null) {
-  if (!sourceMaskCanvas) return null
-
-  const maskSource = bounds ? cropCanvas(sourceMaskCanvas, bounds) : sourceMaskCanvas
-  if (!maskSource) return null
-
-  const sourceContext = maskSource.getContext('2d')
-  const sourceImageData = sourceContext.getImageData(0, 0, maskSource.width, maskSource.height)
-
-  const maskCanvas = document.createElement('canvas')
-  maskCanvas.width = maskSource.width
-  maskCanvas.height = maskSource.height
-  const maskContext = maskCanvas.getContext('2d')
-  const maskImageData = maskContext.createImageData(maskSource.width, maskSource.height)
-
-  for (let index = 0; index < sourceImageData.data.length; index += 4) {
-    const alpha = sourceImageData.data[index + 3]
-    maskImageData.data[index] = alpha
-    maskImageData.data[index + 1] = alpha
-    maskImageData.data[index + 2] = alpha
-    maskImageData.data[index + 3] = 255
-  }
-
-  maskContext.putImageData(maskImageData, 0, 0)
-  return maskCanvas
-}
 
 export default function ImageEditorPage() {
   const navigate = useNavigate()
@@ -300,10 +56,6 @@ export default function ImageEditorPage() {
   const [selectedLayerId, setSelectedLayerId] = useState(null)
   const layerCanvasesRef = useRef(new Map())
   const [renderRevision, setRenderRevision] = useState(0)
-  const historyUndoRef = useRef([])
-  const historyRedoRef = useRef([])
-  const [canUndo, setCanUndo] = useState(false)
-  const [canRedo, setCanRedo] = useState(false)
   const [cursorPreview, setCursorPreview] = useState(null)
 
   const [toolGroup, setToolGroup] = useState('edit')
@@ -355,70 +107,23 @@ export default function ImageEditorPage() {
   const panInteractionRef = useRef({ active: false, pointerId: null, lastX: 0, lastY: 0 })
   const pointerPositionRef = useRef(null)
 
-  const syncHistoryFlags = useCallback(() => {
-    setCanUndo(historyUndoRef.current.length > 0)
-    setCanRedo(historyRedoRef.current.length > 0)
-  }, [])
-
-  const captureSnapshot = useCallback(() => {
-    const layerCanvases = {}
-    layers.forEach(layer => {
-      layerCanvases[layer.id] = cloneCanvasElement(layerCanvasesRef.current.get(layer.id))
-    })
-
-    return {
-      layers: layers.map(layer => ({ ...layer })),
-      selectedLayerId,
-      layerCanvases,
-      maskCanvas: cloneCanvasElement(maskCanvasRef.current)
-    }
-  }, [layers, selectedLayerId])
-
-  const restoreSnapshot = useCallback((snapshot) => {
-    const nextMap = new Map()
-    snapshot.layers.forEach(layer => {
-      const sourceCanvas = snapshot.layerCanvases[layer.id]
-      if (sourceCanvas) {
-        nextMap.set(layer.id, cloneCanvasElement(sourceCanvas))
-      }
-    })
-
-    layerCanvasesRef.current = nextMap
-    maskCanvasRef.current = snapshot.maskCanvas ? cloneCanvasElement(snapshot.maskCanvas) : null
-    setLayers(snapshot.layers.map(layer => ({ ...layer })))
-    setSelectedLayerId(snapshot.selectedLayerId || null)
-    setMaskRevision(prev => prev + 1)
-    setRenderRevision(prev => prev + 1)
-  }, [])
-
-  const pushUndoSnapshot = useCallback(() => {
-    if (layers.length === 0) return
-    const snapshot = captureSnapshot()
-    historyUndoRef.current.push(snapshot)
-    if (historyUndoRef.current.length > 40) {
-      historyUndoRef.current.shift()
-    }
-    historyRedoRef.current = []
-    syncHistoryFlags()
-  }, [captureSnapshot, layers.length, syncHistoryFlags])
-
-  const undo = useCallback(() => {
-    if (historyUndoRef.current.length === 0) return
-    const current = captureSnapshot()
-    const previous = historyUndoRef.current.pop()
-    historyRedoRef.current.push(current)
-    restoreSnapshot(previous)
-    syncHistoryFlags()
-  }, [captureSnapshot, restoreSnapshot, syncHistoryFlags])
-
-  const redo = useCallback(() => {
-    if (historyRedoRef.current.length === 0) return
-    const current = captureSnapshot()
-    const next = historyRedoRef.current.pop()
-    historyUndoRef.current.push(current)
-    restoreSnapshot(next)
-    syncHistoryFlags()
-  }, [captureSnapshot, restoreSnapshot, syncHistoryFlags])
+  const {
+    canUndo,
+    canRedo,
+    pushUndoSnapshot,
+    undo,
+    redo,
+    resetHistory
+  } = useImageEditorHistory({
+    layers,
+    selectedLayerId,
+    setLayers,
+    setSelectedLayerId,
+    layerCanvasesRef,
+    maskCanvasRef,
+    setMaskRevision,
+    setRenderRevision
+  })
 
   const assetId = searchParams.get('assetId') || ''
   const filePath = searchParams.get('filePath') || ''
@@ -1710,9 +1415,7 @@ export default function ImageEditorPage() {
         setCropValues({ x: 0, y: 0, width: baseCanvas.width, height: baseCanvas.height })
         setResizeValues({ width: baseCanvas.width, height: baseCanvas.height })
         resetView()
-        historyUndoRef.current = []
-        historyRedoRef.current = []
-        syncHistoryFlags()
+        resetHistory()
         setFeedback('Image loaded.')
       } catch (err) {
         if (!cancelled) {
@@ -1730,7 +1433,7 @@ export default function ImageEditorPage() {
     return () => {
       cancelled = true
     }
-  }, [createEmptyCanvas, imageSourceUrl, resetView, syncHistoryFlags])
+  }, [createEmptyCanvas, imageSourceUrl, resetView, resetHistory])
 
   useEffect(() => {
     const onKeyDown = event => {
@@ -1942,762 +1645,151 @@ export default function ImageEditorPage() {
     disposeShadowRemoverRenderer()
   }, [])
 
+  const handleWorkflowValueChange = (parameterId, value) => {
+    setWorkflowValues(prev => ({ ...prev, [parameterId]: value }))
+  }
+
+  const handleBrowseImageParamAsset = parameterId => {
+    setPendingAssetParamId(parameterId)
+    setShowAssetSelector(true)
+  }
+
+  const handleChooseImageParamFile = (parameterId, file) => {
+    handleImageParamSourceChange(parameterId, 'file', file)
+  }
+
+  const workflowControlsProps = {
+    workflows,
+    workflowLoading,
+    selectedWorkflowId,
+    setSelectedWorkflowId,
+    selectedWorkflow,
+    workflowValues,
+    onWorkflowValueChange: handleWorkflowValueChange,
+    imageParamSources,
+    aiRunning
+  }
+
   const renderToolControls = () => {
     if (toolGroup === 'edit' && toolId === 'crop') {
       return (
-        <div className="image-editor-controls">
-          <label className="image-editor-label">
-            X
-            <input
-              className="image-editor-input"
-              type="number"
-              value={cropValues.x}
-              min={cropLimits.xMin}
-              max={cropLimits.xMax}
-              step="1"
-              onChange={event => handleCropXChange(event.target.value)}
-            />
-            <input
-              className="image-editor-input"
-              type="range"
-              min={cropLimits.xMin}
-              max={cropLimits.xMax}
-              step="1"
-              value={cropValues.x}
-              onChange={event => handleCropXChange(event.target.value)}
-            />
-          </label>
-          <label className="image-editor-label">
-            Y
-            <input
-              className="image-editor-input"
-              type="number"
-              value={cropValues.y}
-              min={cropLimits.yMin}
-              max={cropLimits.yMax}
-              step="1"
-              onChange={event => handleCropYChange(event.target.value)}
-            />
-            <input
-              className="image-editor-input"
-              type="range"
-              min={cropLimits.yMin}
-              max={cropLimits.yMax}
-              step="1"
-              value={cropValues.y}
-              onChange={event => handleCropYChange(event.target.value)}
-            />
-          </label>
-          <label className="image-editor-label">
-            Width
-            <input
-              className="image-editor-input"
-              type="number"
-              value={cropValues.width}
-              min={cropLimits.widthMin}
-              max={cropLimits.widthMax}
-              step="1"
-              onChange={event => handleCropWidthChange(event.target.value)}
-            />
-            <input
-              className="image-editor-input"
-              type="range"
-              min={cropLimits.widthMin}
-              max={cropLimits.widthMax}
-              step="1"
-              value={cropValues.width}
-              onChange={event => handleCropWidthChange(event.target.value)}
-            />
-          </label>
-          <label className="image-editor-label">
-            Height
-            <input
-              className="image-editor-input"
-              type="number"
-              value={cropValues.height}
-              min={cropLimits.heightMin}
-              max={cropLimits.heightMax}
-              step="1"
-              onChange={event => handleCropHeightChange(event.target.value)}
-            />
-            <input
-              className="image-editor-input"
-              type="range"
-              min={cropLimits.heightMin}
-              max={cropLimits.heightMax}
-              step="1"
-              value={cropValues.height}
-              onChange={event => handleCropHeightChange(event.target.value)}
-            />
-          </label>
-          <button type="button" className="image-editor-btn image-editor-btn--primary" onClick={handleApplyCrop}>
-            Apply Crop
-          </button>
-        </div>
+        <CropControls
+          cropValues={cropValues}
+          cropLimits={cropLimits}
+          onChangeX={handleCropXChange}
+          onChangeY={handleCropYChange}
+          onChangeWidth={handleCropWidthChange}
+          onChangeHeight={handleCropHeightChange}
+          onApply={handleApplyCrop}
+        />
       )
     }
 
     if (toolGroup === 'edit' && toolId === 'resize') {
       return (
-        <div className="image-editor-controls">
-          <label className="image-editor-label">
-            Width
-            <input
-              className="image-editor-input"
-              type="number"
-              value={resizeValues.width}
-              onChange={event => setResizeValues(prev => ({ ...prev, width: Number(event.target.value) }))}
-            />
-          </label>
-          <label className="image-editor-label">
-            Height
-            <input
-              className="image-editor-input"
-              type="number"
-              value={resizeValues.height}
-              onChange={event => setResizeValues(prev => ({ ...prev, height: Number(event.target.value) }))}
-            />
-          </label>
-          <button type="button" className="image-editor-btn image-editor-btn--primary" onClick={handleApplyResize}>
-            Apply Resize
-          </button>
-        </div>
+        <ResizeControls
+          resizeValues={resizeValues}
+          setResizeValues={setResizeValues}
+          onApply={handleApplyResize}
+        />
       )
     }
 
     if (toolGroup === 'edit' && toolId === 'adjust') {
       return (
-        <div className="image-editor-controls">
-          <label className="image-editor-label">
-            Black Point
-            <input
-              className="image-editor-input"
-              type="range"
-              min="0"
-              max="254"
-              value={adjustValues.blackPoint}
-              onChange={event => {
-                setAdjustValues(prev => ({ ...prev, blackPoint: Number(event.target.value) }))
-                setAdjustPreviewDirty(true)
-              }}
-            />
-          </label>
-          <label className="image-editor-label">
-            White Point
-            <input
-              className="image-editor-input"
-              type="range"
-              min="1"
-              max="255"
-              value={adjustValues.whitePoint}
-              onChange={event => {
-                setAdjustValues(prev => ({ ...prev, whitePoint: Number(event.target.value) }))
-                setAdjustPreviewDirty(true)
-              }}
-            />
-          </label>
-          <label className="image-editor-label">
-            Contrast
-            <input
-              className="image-editor-input"
-              type="range"
-              min="-80"
-              max="80"
-              value={adjustValues.contrast}
-              onChange={event => {
-                setAdjustValues(prev => ({ ...prev, contrast: Number(event.target.value) }))
-                setAdjustPreviewDirty(true)
-              }}
-            />
-          </label>
-          <label className="image-editor-label">
-            Saturation
-            <input
-              className="image-editor-input"
-              type="range"
-              min="-100"
-              max="100"
-              value={adjustValues.saturation}
-              onChange={event => {
-                setAdjustValues(prev => ({ ...prev, saturation: Number(event.target.value) }))
-                setAdjustPreviewDirty(true)
-              }}
-            />
-          </label>
-          <div className="image-editor-toggle-row">
-            <button type="button" className="image-editor-btn" onClick={handleResetAdjustments}>
-              Reset
-            </button>
-            <button type="button" className="image-editor-btn image-editor-btn--primary" onClick={handleApplyAdjustments}>
-              Apply Adjustments
-            </button>
-          </div>
-        </div>
+        <AdjustControls
+          adjustValues={adjustValues}
+          setAdjustValues={setAdjustValues}
+          setAdjustPreviewDirty={setAdjustPreviewDirty}
+          onReset={handleResetAdjustments}
+          onApply={handleApplyAdjustments}
+        />
       )
     }
 
     if (toolGroup === 'edit' && toolId === 'filters') {
       return (
-        <div className="image-editor-controls">
-          <label className="image-editor-label">
-            Blur
-            <input
-              className="image-editor-input"
-              type="range"
-              min="0"
-              max="30"
-              value={filterValues.blur}
-              onChange={event => {
-                setFilterValues(prev => ({ ...prev, blur: Number(event.target.value) }))
-                setFilterPreviewDirty(true)
-              }}
-            />
-          </label>
-          <label className="image-editor-label">
-            Sharpen
-            <input
-              className="image-editor-input"
-              type="range"
-              min="0"
-              max="100"
-              value={filterValues.sharpen}
-              onChange={event => {
-                setFilterValues(prev => ({ ...prev, sharpen: Number(event.target.value) }))
-                setFilterPreviewDirty(true)
-              }}
-            />
-          </label>
-          <div className="image-editor-toggle-row">
-            <button type="button" className="image-editor-btn" onClick={handleResetFilters}>
-              Reset
-            </button>
-            <button type="button" className="image-editor-btn image-editor-btn--primary" onClick={handleApplyBlurSharpen}>
-              Apply Filters
-            </button>
-          </div>
-        </div>
+        <FilterControls
+          filterValues={filterValues}
+          setFilterValues={setFilterValues}
+          setFilterPreviewDirty={setFilterPreviewDirty}
+          onReset={handleResetFilters}
+          onApply={handleApplyBlurSharpen}
+        />
       )
     }
 
     if (toolGroup === 'edit' && toolId === 'shadow-remover') {
       return (
-        <div className="image-editor-controls">
-          <label className="image-editor-label">
-            Strength ({shadowRemoverValues.strength}%)
-            <input
-              className="image-editor-input"
-              type="range"
-              min="0"
-              max="100"
-              value={shadowRemoverValues.strength}
-              onChange={event => {
-                setShadowRemoverValues(prev => ({ ...prev, strength: Number(event.target.value) }))
-                setShadowRemoverPreviewDirty(true)
-              }}
-            />
-          </label>
-
-          <label className="image-editor-label">
-            Shadow Threshold ({shadowRemoverValues.threshold}%)
-            <input
-              className="image-editor-input"
-              type="range"
-              min="0"
-              max="100"
-              value={shadowRemoverValues.threshold}
-              onChange={event => {
-                setShadowRemoverValues(prev => ({ ...prev, threshold: Number(event.target.value) }))
-                setShadowRemoverPreviewDirty(true)
-              }}
-            />
-          </label>
-
-          <label className="image-editor-label">
-            Edge Softness ({shadowRemoverValues.softness}%)
-            <input
-              className="image-editor-input"
-              type="range"
-              min="1"
-              max="100"
-              value={shadowRemoverValues.softness}
-              onChange={event => {
-                setShadowRemoverValues(prev => ({ ...prev, softness: Number(event.target.value) }))
-                setShadowRemoverPreviewDirty(true)
-              }}
-            />
-          </label>
-
-          <label className="image-editor-label">
-            Midtone Protection ({shadowRemoverValues.midtoneProtection}%)
-            <input
-              className="image-editor-input"
-              type="range"
-              min="0"
-              max="100"
-              value={shadowRemoverValues.midtoneProtection}
-              onChange={event => {
-                setShadowRemoverValues(prev => ({ ...prev, midtoneProtection: Number(event.target.value) }))
-                setShadowRemoverPreviewDirty(true)
-              }}
-            />
-          </label>
-
-          <label className="image-editor-label">
-            Shadow Warmth ({shadowRemoverValues.warmth > 0 ? '+' : ''}{shadowRemoverValues.warmth}%)
-            <input
-              className="image-editor-input"
-              type="range"
-              min="-100"
-              max="100"
-              value={shadowRemoverValues.warmth}
-              onChange={event => {
-                setShadowRemoverValues(prev => ({ ...prev, warmth: Number(event.target.value) }))
-                setShadowRemoverPreviewDirty(true)
-              }}
-            />
-          </label>
-
-          <div className="image-editor-toggle-row">
-            <button type="button" className="image-editor-btn" onClick={handleResetShadowRemover}>
-              Reset
-            </button>
-            <button type="button" className="image-editor-btn image-editor-btn--primary" onClick={handleApplyShadowRemover}>
-              Apply Shadow Remover
-            </button>
-          </div>
-
-          <p className="image-editor-help">Lifts shadows using a gamma curve (like Lightroom&apos;s Shadows slider). Warmth corrects the cool blue cast common in outdoor shadows. GPU-accelerated with CPU fallback.</p>
-        </div>
+        <ShadowRemoverControls
+          shadowRemoverValues={shadowRemoverValues}
+          setShadowRemoverValues={setShadowRemoverValues}
+          setShadowRemoverPreviewDirty={setShadowRemoverPreviewDirty}
+          onReset={handleResetShadowRemover}
+          onApply={handleApplyShadowRemover}
+        />
       )
     }
 
     if (toolGroup === 'paint') {
       return (
-        <div className="image-editor-controls">
-          <div className="image-editor-toggle-row">
-            <button
-              type="button"
-              className={`image-editor-toggle ${paintMode === 'draw' ? 'image-editor-toggle--active' : ''}`}
-              onClick={() => setPaintMode('draw')}
-            >
-              Draw
-            </button>
-            <button
-              type="button"
-              className={`image-editor-toggle ${paintMode === 'erase' ? 'image-editor-toggle--active' : ''}`}
-              onClick={() => setPaintMode('erase')}
-            >
-              Erase
-            </button>
-          </div>
-
-          <button type="button" className="image-editor-btn" onClick={undo} disabled={!canUndo}>
-            Undo
-          </button>
-
-          <label className="image-editor-label">
-            Brush Source
-            <select
-              className="image-editor-input"
-              value={paintBrushSource}
-              onChange={event => setPaintBrushSource(event.target.value)}
-            >
-              <option value="color">Color Brush</option>
-              <option value="asset">Image Brush (Library)</option>
-              <option value="computer">Image Brush (Computer)</option>
-            </select>
-          </label>
-
-          {paintBrushSource === 'asset' && (
-            <button type="button" className="image-editor-btn" onClick={() => setShowBrushSelector(true)}>
-              Select Brush from Library
-            </button>
-          )}
-
-          {paintBrushSource === 'computer' && (
-            <>
-              <button type="button" className="image-editor-btn" onClick={() => paintBrushFileInputRef.current?.click()}>
-                Upload Brush from Computer
-              </button>
-              <input
-                ref={paintBrushFileInputRef}
-                type="file"
-                accept=".png,.jpg,.jpeg,.webp"
-                className="image-editor-hidden-file"
-                onChange={event => {
-                  const file = event.target.files?.[0]
-                  if (file) {
-                    setPaintBrushFile(file)
-                    setPaintBrushAsset(null)
-                  }
-                  event.target.value = ''
-                }}
-              />
-            </>
-          )}
-
-          <label className="image-editor-label">
-            Color
-            <input
-              className="image-editor-input image-editor-input--color"
-              type="color"
-              value={paintColor}
-              onChange={event => setPaintColor(event.target.value)}
-            />
-          </label>
-
-          <label className="image-editor-label">
-            Size ({paintSize}px)
-            <input
-              className="image-editor-input"
-              type="range"
-              min="1"
-              max="320"
-              value={paintSize}
-              onChange={event => setPaintSize(Number(event.target.value))}
-            />
-          </label>
-
-          <label className="image-editor-label">
-            Opacity ({Math.round(paintOpacity * 100)}%)
-            <input
-              className="image-editor-input"
-              type="range"
-              min="0"
-              max="1"
-              step="0.01"
-              value={paintOpacity}
-              onChange={event => setPaintOpacity(Number(event.target.value))}
-            />
-          </label>
-
-          <label className="image-editor-label">
-            Hardness ({Math.round(paintHardness * 100)}%)
-            <input
-              className="image-editor-input"
-              type="range"
-              min="0"
-              max="1"
-              step="0.01"
-              value={paintHardness}
-              onChange={event => setPaintHardness(Number(event.target.value))}
-            />
-          </label>
-
-          <label className="image-editor-label">
-            Blend Mode
-            <select
-              className="image-editor-input"
-              value={paintBlendMode}
-              onChange={event => setPaintBlendMode(event.target.value)}
-            >
-              {PAINT_BLEND_MODES.map(mode => (
-                <option key={mode.value} value={mode.value}>{mode.label}</option>
-              ))}
-            </select>
-          </label>
-
-          <p className="image-editor-help">Paint directly on the canvas. If the selected layer is locked, a new layer will be created automatically.</p>
-        </div>
+        <PaintControls
+          paint={{
+            paintMode,
+            setPaintMode,
+            paintBrushSource,
+            setPaintBrushSource,
+            paintBrushFileInputRef,
+            setPaintBrushFile,
+            setPaintBrushAsset,
+            paintColor,
+            setPaintColor,
+            paintSize,
+            setPaintSize,
+            paintOpacity,
+            setPaintOpacity,
+            paintHardness,
+            setPaintHardness,
+            paintBlendMode,
+            setPaintBlendMode
+          }}
+          canUndo={canUndo}
+          onUndo={undo}
+          onSelectBrushFromLibrary={() => setShowBrushSelector(true)}
+        />
       )
     }
 
     if (toolGroup === 'ai' && toolId === 'comfyui') {
       return (
-        <div className="image-editor-controls">
-          <label className="image-editor-label">
-            ComfyUI Workflow
-            <select
-              className="image-editor-input"
-              value={selectedWorkflowId}
-              onChange={event => setSelectedWorkflowId(event.target.value)}
-              disabled={workflowLoading || workflows.length === 0}
-            >
-              {workflows.length === 0 ? (
-                <option value="">No compatible workflows</option>
-              ) : workflows.map(workflow => (
-                <option key={workflow.id} value={workflow.id}>{workflow.name}</option>
-              ))}
-            </select>
-          </label>
-
-          {selectedWorkflow && (
-            <div className="image-editor-controls image-editor-controls--nested">
-              <span className="image-editor-label">Image Inputs</span>
-              {(selectedWorkflow.parameters || [])
-                .filter(parameter => getValueType(parameter) === 'image')
-                .map(parameter => {
-                  const config = imageParamSources[parameter.id] || { type: 'none' }
-                  const displayType = config.type === 'mask' ? 'none' : config.type
-                  return (
-                    <div key={parameter.id} className="image-editor-label image-editor-ai-input">
-                      <span>{parameter.name}</span>
-                      <select
-                        className="image-editor-input"
-                        value={displayType}
-                        onChange={event => handleImageParamSourceChange(parameter.id, event.target.value)}
-                      >
-                        <option value="none">- Not used -</option>
-                        <option value="source">Use as source image (full image)</option>
-                        <option value="asset">From assets</option>
-                        <option value="file">From computer</option>
-                      </select>
-
-                      {config.type === 'asset' && (
-                        <div className="image-editor-ai-row">
-                          <span className="image-editor-help">{config.asset?.name || 'No asset selected'}</span>
-                          <button
-                            type="button"
-                            className="image-editor-btn"
-                            onClick={() => {
-                              setPendingAssetParamId(parameter.id)
-                              setShowAssetSelector(true)
-                            }}
-                          >
-                            Browse
-                          </button>
-                        </div>
-                      )}
-
-                      {config.type === 'file' && (
-                        <div className="image-editor-ai-row">
-                          <span className="image-editor-help">{config.fileName || 'No file chosen'}</span>
-                          <label className="image-editor-btn" style={{ cursor: 'pointer' }}>
-                            Choose file
-                            <input
-                              type="file"
-                              accept="image/*"
-                              className="image-editor-hidden-file"
-                              onChange={event => {
-                                const file = event.target.files?.[0]
-                                if (file) {
-                                  handleImageParamSourceChange(parameter.id, 'file', file)
-                                }
-                                event.target.value = ''
-                              }}
-                            />
-                          </label>
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
-            </div>
-          )}
-
-          {(selectedWorkflow?.parameters || [])
-            .filter(parameter => getValueType(parameter) !== 'image')
-            .map(parameter => {
-              const valueType = getValueType(parameter)
-              if (valueType === 'boolean') {
-                return (
-                  <label key={parameter.id} className="image-editor-label image-editor-label--checkbox">
-                    <input
-                      type="checkbox"
-                      checked={Boolean(workflowValues[parameter.id])}
-                      onChange={event => setWorkflowValues(prev => ({ ...prev, [parameter.id]: event.target.checked }))}
-                    />
-                    <span>{parameter.name}</span>
-                  </label>
-                )
-              }
-
-              return (
-                <label key={parameter.id} className="image-editor-label">
-                  {parameter.name}
-                  <input
-                    className="image-editor-input"
-                    type={valueType === 'number' ? 'number' : 'text'}
-                    value={workflowValues[parameter.id] ?? ''}
-                    onChange={event => setWorkflowValues(prev => ({ ...prev, [parameter.id]: event.target.value }))}
-                  />
-                </label>
-              )
-            })}
-
-          <button
-            type="button"
-            className="image-editor-btn image-editor-btn--primary"
-            disabled={aiRunning || !selectedWorkflow}
-            onClick={handleRunAiFull}
-          >
-            {aiRunning ? 'Running...' : 'Run ComfyUI'}
-          </button>
-
-          <p className="image-editor-help">Sends the full composited image to ComfyUI and adds the result as a new layer.</p>
-        </div>
+        <ComfyUIFullControls
+          workflow={workflowControlsProps}
+          onChangeImageParamSource={handleImageParamSourceChange}
+          onBrowseAsset={handleBrowseImageParamAsset}
+          onChooseFile={handleChooseImageParamFile}
+          onRun={handleRunAiFull}
+        />
       )
     }
 
     return (
-      <div className="image-editor-controls">
-        <div className="image-editor-toggle-row">
-          <button
-            type="button"
-            className={`image-editor-toggle ${maskMode === 'paint' ? 'image-editor-toggle--active' : ''}`}
-            onClick={() => setMaskMode('paint')}
-          >
-            Paint Mask
-          </button>
-          <button
-            type="button"
-            className={`image-editor-toggle ${maskMode === 'erase' ? 'image-editor-toggle--active' : ''}`}
-            onClick={() => setMaskMode('erase')}
-          >
-            Erase Mask
-          </button>
-        </div>
-
-        <label className="image-editor-label">
-          Mask Size
-          <input
-            className="image-editor-input"
-            type="range"
-            min="4"
-            max="360"
-            value={maskSize}
-            onChange={event => setMaskSize(Number(event.target.value))}
-          />
-        </label>
-
-        <label className="image-editor-label">
-          Mask Hardness
-          <input
-            className="image-editor-input"
-            type="range"
-            min="0"
-            max="1"
-            step="0.01"
-            value={maskHardness}
-            onChange={event => setMaskHardness(Number(event.target.value))}
-          />
-        </label>
-
-        <button type="button" className="image-editor-btn" onClick={clearMask}>
-          Clear Mask
-        </button>
-
-        <label className="image-editor-label">
-          ComfyUI Workflow
-          <select
-            className="image-editor-input"
-            value={selectedWorkflowId}
-            onChange={event => setSelectedWorkflowId(event.target.value)}
-            disabled={workflowLoading || workflows.length === 0}
-          >
-            {workflows.length === 0 ? (
-              <option value="">No compatible workflows</option>
-            ) : workflows.map(workflow => (
-              <option key={workflow.id} value={workflow.id}>{workflow.name}</option>
-            ))}
-          </select>
-        </label>
-
-        {selectedWorkflow && (
-          <div className="image-editor-controls image-editor-controls--nested">
-            <span className="image-editor-label">Image Inputs</span>
-            {(selectedWorkflow.parameters || [])
-              .filter(parameter => getValueType(parameter) === 'image')
-              .map(parameter => {
-                const config = imageParamSources[parameter.id] || { type: 'none' }
-                return (
-                  <div key={parameter.id} className="image-editor-label image-editor-ai-input">
-                    <span>{parameter.name}</span>
-                    <select
-                      className="image-editor-input"
-                      value={config.type}
-                      onChange={event => handleImageParamSourceChange(parameter.id, event.target.value)}
-                    >
-                      <option value="none">- Not used -</option>
-                      <option value="source">Use as source image (painted image view)</option>
-                      <option value="mask">Use as mask image (painted mask)</option>
-                      <option value="asset">From assets</option>
-                      <option value="file">From computer</option>
-                    </select>
-
-                    {config.type === 'asset' && (
-                      <div className="image-editor-ai-row">
-                        <span className="image-editor-help">{config.asset?.name || 'No asset selected'}</span>
-                        <button
-                          type="button"
-                          className="image-editor-btn"
-                          onClick={() => {
-                            setPendingAssetParamId(parameter.id)
-                            setShowAssetSelector(true)
-                          }}
-                        >
-                          Browse
-                        </button>
-                      </div>
-                    )}
-
-                    {config.type === 'file' && (
-                      <div className="image-editor-ai-row">
-                        <span className="image-editor-help">{config.fileName || 'No file chosen'}</span>
-                        <label className="image-editor-btn" style={{ cursor: 'pointer' }}>
-                          Choose file
-                          <input
-                            type="file"
-                            accept="image/*"
-                            className="image-editor-hidden-file"
-                            onChange={event => {
-                              const file = event.target.files?.[0]
-                              if (file) {
-                                handleImageParamSourceChange(parameter.id, 'file', file)
-                              }
-                              event.target.value = ''
-                            }}
-                          />
-                        </label>
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-          </div>
-        )}
-
-        {(selectedWorkflow?.parameters || [])
-          .filter(parameter => getValueType(parameter) !== 'image')
-          .map(parameter => {
-            const valueType = getValueType(parameter)
-            if (valueType === 'boolean') {
-              return (
-                <label key={parameter.id} className="image-editor-label image-editor-label--checkbox">
-                  <input
-                    type="checkbox"
-                    checked={Boolean(workflowValues[parameter.id])}
-                    onChange={event => setWorkflowValues(prev => ({ ...prev, [parameter.id]: event.target.checked }))}
-                  />
-                  <span>{parameter.name}</span>
-                </label>
-              )
-            }
-
-            return (
-              <label key={parameter.id} className="image-editor-label">
-                {parameter.name}
-                <input
-                  className="image-editor-input"
-                  type={valueType === 'number' ? 'number' : 'text'}
-                  value={workflowValues[parameter.id] ?? ''}
-                  onChange={event => setWorkflowValues(prev => ({ ...prev, [parameter.id]: event.target.value }))}
-                />
-              </label>
-            )
-          })}
-
-        <button
-          type="button"
-          className="image-editor-btn image-editor-btn--primary"
-          disabled={aiRunning || !selectedWorkflow || !maskHasPixels}
-          onClick={handleRunAi}
-        >
-          {aiRunning ? 'Running...' : 'Run ComfyUI'}
-        </button>
-
-        {!maskHasPixels && <p className="image-editor-help">Paint a mask region before running AI.</p>}
-      </div>
+      <ComfyUIMaskControls
+        workflow={workflowControlsProps}
+        mask={{
+          maskMode,
+          setMaskMode,
+          maskSize,
+          setMaskSize,
+          maskHardness,
+          setMaskHardness,
+          maskHasPixels
+        }}
+        onChangeImageParamSource={handleImageParamSourceChange}
+        onBrowseAsset={handleBrowseImageParamAsset}
+        onChooseFile={handleChooseImageParamFile}
+        onClearMask={clearMask}
+        onRun={handleRunAi}
+      />
     )
   }
 
@@ -2708,44 +1800,21 @@ export default function ImageEditorPage() {
 
       <main className="image-editor-page">
         <section className="image-editor-shell">
-          <div className="image-editor-toolbar">
-            <div className="image-editor-toolbar__left">
-              <button type="button" className="image-editor-btn" onClick={() => navigate(returnTo)}>
-                <span className="material-symbols-outlined">arrow_back</span>
-                Back
-              </button>
-              <div>
-                <h1 className="image-editor-title font-headline">Image Editor</h1>
-                <p className="image-editor-subtitle">{imageName}</p>
-              </div>
-            </div>
-
-            <div className="image-editor-toolbar__right">
-              <button type="button" className="image-editor-btn" onClick={undo} disabled={!canUndo} title="Undo (Ctrl/Cmd+Z)">
-                <span className="material-symbols-outlined">undo</span>
-                Undo
-              </button>
-              <button type="button" className="image-editor-btn" onClick={redo} disabled={!canRedo} title="Redo (Ctrl/Cmd+Shift+Z)">
-                <span className="material-symbols-outlined">redo</span>
-                Redo
-              </button>
-              {numericAssetId > 0 && (
-                <button type="button" className="image-editor-btn" onClick={handleSaveImage} disabled={loading || layers.length === 0 || saving}>
-                  <span className="material-symbols-outlined">save</span>
-                  Save Image
-                </button>
-              )}
-              {numericAssetId > 0 && (
-                <button type="button" className="image-editor-btn" onClick={handleSaveNewVersion} disabled={loading || layers.length === 0 || saving}>
-                  <span className="material-symbols-outlined">save_as</span>
-                  Save New Version
-                </button>
-              )}
-              <button type="button" className="image-editor-btn image-editor-btn--primary" onClick={handleExportPng} disabled={loading || layers.length === 0}>
-                Export PNG
-              </button>
-            </div>
-          </div>
+          <ImageEditorToolbar
+            imageName={imageName}
+            onBack={() => navigate(returnTo)}
+            onUndo={undo}
+            onRedo={redo}
+            canUndo={canUndo}
+            canRedo={canRedo}
+            showSaveButtons={numericAssetId > 0}
+            onSaveImage={handleSaveImage}
+            onSaveNewVersion={handleSaveNewVersion}
+            onExportPng={handleExportPng}
+            loading={loading}
+            saving={saving}
+            layerCount={layers.length}
+          />
 
           {feedback && (
             <div className="image-editor-feedback">
@@ -2755,63 +1824,16 @@ export default function ImageEditorPage() {
           )}
 
           <div className="image-editor-workspace">
-            <aside className="image-editor-tools">
-              <div className="image-editor-tools__group">
-                <h3 className="image-editor-tools__group-title">Edit</h3>
-                {TOOLS.edit.map(item => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    className={`image-editor-tools__item ${toolGroup === 'edit' && toolId === item.id ? 'image-editor-tools__item--active' : ''}`}
-                    onClick={() => {
-                      setToolGroup('edit')
-                      setToolId(item.id)
-                    }}
-                  >
-                    <span className="material-symbols-outlined">{item.icon}</span>
-                    <span>{item.label}</span>
-                  </button>
-                ))}
-              </div>
-
-              <div className="image-editor-tools__group">
-                <h3 className="image-editor-tools__group-title">Paint</h3>
-                {TOOLS.paint.map(item => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    className={`image-editor-tools__item ${toolGroup === 'paint' && toolId === item.id ? 'image-editor-tools__item--active' : ''}`}
-                    onClick={() => {
-                      setToolGroup('paint')
-                      setToolId(item.id)
-                    }}
-                  >
-                    <span className="material-symbols-outlined">{item.icon}</span>
-                    <span>{item.label}</span>
-                  </button>
-                ))}
-              </div>
-
-              <div className="image-editor-tools__group">
-                <h3 className="image-editor-tools__group-title">AI</h3>
-                {TOOLS.ai.map(item => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    className={`image-editor-tools__item ${toolGroup === 'ai' && toolId === item.id ? 'image-editor-tools__item--active' : ''}`}
-                    onClick={() => {
-                      setToolGroup('ai')
-                      setToolId(item.id)
-                    }}
-                  >
-                    <span className="material-symbols-outlined">{item.icon}</span>
-                    <span>{item.label}</span>
-                  </button>
-                ))}
-              </div>
-
+            <ToolSidebar
+              toolGroup={toolGroup}
+              toolId={toolId}
+              onSelectTool={(group, id) => {
+                setToolGroup(group)
+                setToolId(id)
+              }}
+            >
               {renderToolControls()}
-            </aside>
+            </ToolSidebar>
 
             <div
               className="image-editor-canvas-shell"
@@ -2870,136 +1892,16 @@ export default function ImageEditorPage() {
               )}
             </div>
 
-            <aside className="image-editor-layers-panel">
-              <div className="image-editor-layers-panel__header">
-                <span className="image-editor-layers-panel__title">Layers</span>
-                <div className="image-editor-layers-panel__actions">
-                  <button type="button" className="image-editor-layer-btn" onClick={handleAddLayer} disabled={loading}>
-                    <span className="material-symbols-outlined">add</span>
-                  </button>
-                </div>
-              </div>
-
-              <div className="image-editor-layers-panel__list">
-                {layers.length === 0 ? (
-                  <div className="image-editor-layers-panel__empty">No layers loaded.</div>
-                ) : (
-                  [...layers].slice().reverse().map((layer, reverseIndex) => {
-                    const index = layers.length - 1 - reverseIndex
-                    const isFirst = index === layers.length - 1
-                    const isLast = index === 0
-
-                    return (
-                      <div
-                        key={layer.id}
-                        className={`image-editor-layer-card ${selectedLayerId === layer.id ? 'image-editor-layer-card--selected' : ''}`}
-                        onClick={() => setSelectedLayerId(prev => (prev === layer.id ? null : layer.id))}
-                      >
-                        <div className="image-editor-layer-card__header">
-                          <input
-                            type="radio"
-                            className="image-editor-layer-card__radio"
-                            checked={selectedLayerId === layer.id}
-                            onChange={() => setSelectedLayerId(layer.id)}
-                            onClick={event => {
-                              event.stopPropagation()
-                              if (selectedLayerId === layer.id) {
-                                event.preventDefault()
-                                setSelectedLayerId(null)
-                              }
-                            }}
-                          />
-
-                          <button
-                            type="button"
-                            className="image-editor-layer-card__icon-btn"
-                            onClick={event => {
-                              event.stopPropagation()
-                              handleUpdateLayer(layer.id, { visible: !layer.visible })
-                            }}
-                            title={layer.visible ? 'Hide layer' : 'Show layer'}
-                          >
-                            <span className="material-symbols-outlined">{layer.visible ? 'visibility' : 'visibility_off'}</span>
-                          </button>
-
-                          <input
-                            className="image-editor-layer-card__name"
-                            value={layer.name}
-                            onChange={event => handleUpdateLayer(layer.id, { name: event.target.value })}
-                            onClick={event => event.stopPropagation()}
-                          />
-
-                          <button
-                            type="button"
-                            className="image-editor-layer-card__icon-btn"
-                            title="Move up"
-                            disabled={isFirst}
-                            onClick={event => {
-                              event.stopPropagation()
-                              handleMoveLayer(layer.id, 'up')
-                            }}
-                          >
-                            <span className="material-symbols-outlined">keyboard_arrow_up</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            className="image-editor-layer-card__icon-btn"
-                            title="Move down"
-                            disabled={isLast}
-                            onClick={event => {
-                              event.stopPropagation()
-                              handleMoveLayer(layer.id, 'down')
-                            }}
-                          >
-                            <span className="material-symbols-outlined">keyboard_arrow_down</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            className="image-editor-layer-card__icon-btn"
-                            title={layer.id === 'base-layer' ? 'Base layer cannot be deleted' : 'Delete layer'}
-                            disabled={layer.id === 'base-layer'}
-                            onClick={event => {
-                              event.stopPropagation()
-                              handleDeleteLayer(layer.id)
-                            }}
-                          >
-                            <span className="material-symbols-outlined">delete</span>
-                          </button>
-                        </div>
-
-                        <div className="image-editor-layer-card__row">
-                          <span>Opacity</span>
-                          <input
-                            type="range"
-                            min="0"
-                            max="1"
-                            step="0.01"
-                            value={layer.opacity}
-                            onChange={event => handleUpdateLayer(layer.id, { opacity: Number(event.target.value) })}
-                            onClick={event => event.stopPropagation()}
-                          />
-                        </div>
-
-                        <div className="image-editor-layer-card__row">
-                          <span>Blend</span>
-                          <select
-                            value={layer.blendMode}
-                            onChange={event => handleUpdateLayer(layer.id, { blendMode: event.target.value })}
-                            onClick={event => event.stopPropagation()}
-                          >
-                            {PAINT_BLEND_MODES.map(mode => (
-                              <option key={mode.value} value={mode.value}>{mode.label}</option>
-                            ))}
-                          </select>
-                        </div>
-                      </div>
-                    )
-                  })
-                )}
-              </div>
-            </aside>
+            <LayersPanel
+              layers={layers}
+              selectedLayerId={selectedLayerId}
+              setSelectedLayerId={setSelectedLayerId}
+              loading={loading}
+              onAddLayer={handleAddLayer}
+              onUpdateLayer={handleUpdateLayer}
+              onMoveLayer={handleMoveLayer}
+              onDeleteLayer={handleDeleteLayer}
+            />
           </div>
         </section>
       </main>
