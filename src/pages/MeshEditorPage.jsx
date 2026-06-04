@@ -848,10 +848,8 @@ export default function MeshEditorPage() {
     // painting silently does nothing. Falling back to no clip keeps painting
     // working (a stamp may bleed past a chart border when the clip can't be
     // trusted, which is far preferable to drawing nothing).
-    if (islandPath) {
-      const inside = lctx.isPointInPath(islandPath, point.x, point.y);
-      console.log('[paint-debug] inPath', inside);
-      if (inside) lctx.clip(islandPath);
+    if (islandPath && lctx.isPointInPath(islandPath, point.x, point.y)) {
+      lctx.clip(islandPath);
     }
     lctx.globalAlpha = Math.max(0, Math.min(1, flow));
     lctx.globalCompositeOperation = blendMode || 'source-over';
