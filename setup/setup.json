@@ -338,6 +338,31 @@
 			"Outputs": [
 				{ "Node": "5", "Name": "Save Mesh", "Type": "Mesh" }
 			]
+		},
+		{
+			"Name": "Texture Mesh with Trellis2",
+			"File": "setup/Texture Mesh with Trellis2.json",
+			"Inputs": [
+				{ "Node": "1", "Input": "image",  "Name": "Source Image", "Type": "Image" },
+				{ "Node": "8", "Input": "glb_path",  "Name": "Source Mesh", "Type": "Mesh" },
+				{ "Node": "3",  "Input": "texture_size",  "Name": "Texture Size",   "Type": "Number" }
+			],
+			"Outputs": [
+				{ "Node": "12", "Name": "Output Mesh", "Type": "Mesh" }
+			]
+		},
+		{
+			"Name": "Describe Image with QwenVL",
+			"File": "setup/Describe Image with QwenVL.json",
+			"Inputs": [
+				{ "Node": "2", "Input": "image",  "Name": "Source Image", "Type": "Image" },
+				{ "Node": "1",  "Input": "max_tokens",  "Name": "Max Tokens",   "Type": "Number" },
+				{ "Node": "1",  "Input": "custom_prompt", "Name": "Custom Prompt", "Type": "String" },
+				{ "Node": "1",  "Input": "keep_model_loaded", "Name": "Keep Model Loaded", "Type": "Boolean" }
+			],
+			"Outputs": [
+				{ "Node": "3", "Name": "Output Text", "Type": "String" }
+			]
 		}			
 	]
 }
