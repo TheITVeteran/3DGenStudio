@@ -953,18 +953,22 @@ export default function KanbanPage() {
 
     if (pendingFocus.type === 'mesh-result') {
       const existingMeshAssetIds = new Set(pendingFocus.existingMeshAssetIds || [])
-      const firstNewMeshIndex = targetCard.meshAssets.findIndex(asset => !existingMeshAssetIds.has(asset.id))
+      // Flatten meshes the same way getCardPreviewItems does (each root followed by
+      // its versions), so a newly generated mesh — root or child — maps to the
+      // carousel page that actually shows it.
+      const meshItemIds = (targetCard.meshAssets || [])
+        .flatMap(asset => [asset.id, ...getAssetChildren(asset).map(child => child.id)])
+      const firstNewMeshIndex = meshItemIds.findIndex(id => !existingMeshAssetIds.has(id))
 
       if (firstNewMeshIndex < 0) {
         return
       }
 
-      const meshIndex = firstNewMeshIndex
       const imageItemCount = (targetCard.assets || []).reduce((count, asset) => count + 1 + getAssetChildren(asset).length, 0)
 
       setImageCardPages(prev => ({
         ...prev,
-        [pendingFocus.cardId]: imageItemCount + meshIndex
+        [pendingFocus.cardId]: imageItemCount + firstNewMeshIndex
       }))
       didApplyFocus = true
     }
@@ -1424,7 +1428,10 @@ export default function KanbanPage() {
       return
     }
 
-    const existingMeshAssetIds = (card.meshAssets || []).map(asset => asset.id)
+    // Track every mesh item (roots and their versions/children) so the focus
+    // logic can detect a newly generated child mesh, not just new root meshes.
+    const existingMeshAssetIds = (card.meshAssets || [])
+      .flatMap(asset => [asset.id, ...getAssetChildren(asset).map(child => child.id)])
 
     try {
       setImageEditPendingCardId(card.id)
@@ -1550,7 +1557,10 @@ export default function KanbanPage() {
     const isMeshWorkflowCard = isMeshGenCard || isMeshEditCard || isTexturingCard
     const actionLabel = isMeshGenCard ? 'mesh generation' : isMeshEditCard ? 'mesh edit' : isTexturingCard ? 'mesh texturing' : 'image edit'
     const sourceAssetLabel = isMeshEditCard || isTexturingCard ? 'mesh' : 'image'
-    const existingMeshAssetIds = (card.meshAssets || []).map(asset => asset.id)
+    // Track every mesh item (roots and their versions/children) so the focus
+    // logic can detect a newly generated child mesh, not just new root meshes.
+    const existingMeshAssetIds = (card.meshAssets || [])
+      .flatMap(asset => [asset.id, ...getAssetChildren(asset).map(child => child.id)])
     const existingChildCountByAssetId = Object.fromEntries((card.assets || []).map(asset => [asset.id, getAssetChildren(asset).length]))
     const selectedImageSourceGroup = !isMeshWorkflowCard
       ? getCardImageSourceGroups(card).find(group => group.options.some(option => option.value === imageEditDraft.selectedAssetId))
