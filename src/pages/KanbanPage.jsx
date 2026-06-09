@@ -12,6 +12,7 @@ import { createMeshThumbnailFile } from '../utils/meshThumbnail'
 import './KanbanPage.css'
 import AssetSelectorModal from '../components/AssetSelectorModal';
 import KanbanImageCard from '../components/kanban/KanbanImageCard'
+import MeshGenApiOptions from '../components/kanban/MeshGenApiOptions'
 import {
   DEFAULT_ATTRIBUTE_TYPE_ID,
   IMAGE_API_LIST,
@@ -36,6 +37,7 @@ import {
   formatWorkflowDefaultValue,
   getAssetChildren,
   getComfyDraftFromWorkflow,
+  getMeshGenApiDefaults,
   getWorkflowFileInputAccept,
   getWorkflowFileInputIcon,
   getWorkflowParameterValueType,
@@ -44,6 +46,10 @@ import {
   isTripoMeshGenerationApi,
   normalizeCustomApiType
 } from '../utils/kanbanHelpers'
+import { saveWorkflowDefaults } from '../utils/workflowDefaults'
+
+// Database id of the "Mesh Gen" kanban column (see IMAGE_CARD_COLUMNS).
+const MESH_GEN_COLUMN_ID = 3
 
 export default function KanbanPage() {
   const { projectId } = useParams()
@@ -73,6 +79,7 @@ export default function KanbanPage() {
     runImageEditComfy,
     generateImage,
     getComfyWorkflows,
+    updateComfyWorkflow,
     runComfyWorkflow,
     subscribeToComfyWorkflowProgress
   } = useProjects()
@@ -87,6 +94,8 @@ export default function KanbanPage() {
   const [showSettings, setShowSettings] = useState(false)
   const [imageDraft, setImageDraft] = useState(null) // null | { mode: 'select'|'local'|'comfy'|'api' }
   const [pendingImageGeneration, setPendingImageGeneration] = useState(null)
+  const [meshDraft, setMeshDraft] = useState(null) // null | { mode: 'select'|'comfy'|'api' } — "Add New Mesh" in Mesh Gen column
+  const [pendingMeshGeneration, setPendingMeshGeneration] = useState(null)
   const [comfyWorkflows, setComfyWorkflows] = useState([])
   const [comfyLoading, setComfyLoading] = useState(false)
   const [imageCardPages, setImageCardPages] = useState({})
@@ -94,6 +103,7 @@ export default function KanbanPage() {
   const [cardAttributes, setCardAttributes] = useState([])
   const [draggedCard, setDraggedCard] = useState(null)
   const [dropTarget, setDropTarget] = useState(null)
+  const [fileDropColumnId, setFileDropColumnId] = useState(null)
   const [imageEditDraft, setImageEditDraft] = useState(null)
   const [imageEditPendingCardId, setImageEditPendingCardId] = useState(null)
   const [imageEditProgressByCardId, setImageEditProgressByCardId] = useState({})
@@ -102,6 +112,9 @@ export default function KanbanPage() {
   const [statusMessage, setStatusMessage] = useState(null)
   const fileInputRef = useRef(null)
   const fileUploadContextRef = useRef({ cardId: null, closeDraft: true })
+  const meshFileInputRef = useRef(null)
+  const meshUploadContextRef = useRef({ closeDraft: true })
+  const pendingMeshProgressSubscriptionRef = useRef(null)
   const pendingComfyProgressSubscriptionRef = useRef(null)
   const imageEditProgressSubscriptionsRef = useRef(new Map())
   const statusMessageTimeoutRef = useRef(null)
@@ -183,6 +196,21 @@ export default function KanbanPage() {
     loadComfyWorkflows()
   }, [getComfyWorkflows])
 
+  const refreshComfyWorkflows = async () => {
+    try {
+      setComfyWorkflows(await getComfyWorkflows())
+    } catch (err) {
+      console.error('Failed to refresh ComfyUI workflows:', err)
+    }
+  }
+
+  // Persist current field values as the workflow's defaults when "Set as default" is checked.
+  const persistWorkflowDefaultsIfRequested = async (draft, workflow) => {
+    if (!draft?.setAsDefault) return
+    const saved = await saveWorkflowDefaults(updateComfyWorkflow, workflow, draft.inputs || {})
+    if (saved) await refreshComfyWorkflows()
+  }
+
   const openImageSourceMenu = (cardId = null) => {
     setImageDraft({ mode: 'select', cardId })
   }
@@ -247,7 +275,7 @@ export default function KanbanPage() {
     setProjectCards(cardsData)
   }, [getProjectAssets, getProjectCards, projectId])
 
-  const ensureGeneratedMeshThumbnail = async (asset) => {
+  const ensureGeneratedMeshThumbnail = useCallback(async (asset) => {
     if (!asset || asset.type !== 'mesh' || asset.thumbnail) {
       return asset
     }
@@ -270,9 +298,9 @@ export default function KanbanPage() {
     }
 
     return await uploadAssetThumbnail(asset.id, thumbnailFile)
-  }
+  }, [uploadAssetThumbnail])
 
-  const ensureGeneratedMeshThumbnails = async (generatedAssets) => {
+  const ensureGeneratedMeshThumbnails = useCallback(async (generatedAssets) => {
     const meshAssets = (Array.isArray(generatedAssets) ? generatedAssets : [generatedAssets]).filter(asset => asset?.type === 'mesh')
 
     for (const meshAsset of meshAssets) {
@@ -282,7 +310,7 @@ export default function KanbanPage() {
         console.warn(`Failed to generate thumbnail for mesh ${meshAsset?.name || meshAsset?.id}:`, err)
       }
     }
-  }
+  }, [ensureGeneratedMeshThumbnail])
 
   const refreshCardAttributes = async () => {
     const attributesData = await getProjectCardAttributes(projectId)
@@ -316,6 +344,33 @@ export default function KanbanPage() {
     })
   }
 
+  const closePendingMeshProgressSubscription = () => {
+    pendingMeshProgressSubscriptionRef.current?.()
+    pendingMeshProgressSubscriptionRef.current = null
+  }
+
+  const openPendingMeshProgressSubscription = (promptId) => {
+    closePendingMeshProgressSubscription()
+
+    pendingMeshProgressSubscriptionRef.current = subscribeToComfyWorkflowProgress(promptId, {
+      onMessage: (payload) => {
+        setPendingMeshGeneration(prev => {
+          if (!prev || prev.promptId !== promptId) {
+            return prev
+          }
+
+          return {
+            ...prev,
+            progressPercent: Math.max(prev.progressPercent || 0, Number(payload?.progressPercent) || 0),
+            detail: payload?.detail || prev.detail,
+            currentNodeLabel: payload?.currentNodeLabel || prev.currentNodeLabel
+          }
+        })
+      },
+      onError: () => {}
+    })
+  }
+
   const closeImageEditProgressSubscription = (cardId = null) => {
     if (cardId) {
       imageEditProgressSubscriptionsRef.current.get(cardId)?.()
@@ -331,6 +386,7 @@ export default function KanbanPage() {
     return () => {
       clearTimeout(statusMessageTimeoutRef.current)
       closePendingComfyProgressSubscription()
+      closePendingMeshProgressSubscription()
       closeImageEditProgressSubscription()
     }
   }, [])
@@ -478,6 +534,7 @@ export default function KanbanPage() {
           detail: 'Saving generated image',
           currentNodeLabel: 'Generated image received'
         } : prev)
+        await persistWorkflowDefaultsIfRequested(draft, workflow)
         await refreshProjectAssets()
       } catch (err) {
         console.error('ComfyUI workflow failed:', err)
@@ -551,7 +608,17 @@ export default function KanbanPage() {
     }, {})
   }, [projectCards])
 	
+  // Move a freshly created card into the Mesh Gen column. New assets/cards are
+  // always created in the Images column server-side, so meshes added directly
+  // (local upload, asset library, ComfyUI) need to be relocated afterwards.
+  const moveCardToMeshGen = useCallback(async (cardId) => {
+    if (!cardId) return
+    const position = projectCards.filter(card => card.kanbanColumnId === MESH_GEN_COLUMN_ID).length
+    await moveKanbanCard(projectId, cardId, MESH_GEN_COLUMN_ID, position)
+  }, [projectCards, projectId, moveKanbanCard])
+
 	const handleAssetSelected = useCallback(async (asset) => {
+		const isMesh = assetSelectorType === 'mesh';
 		// Determine card ID – generate a new one if none pending
 		let cardId = pendingAssetCardId;
 		if (!cardId) {
@@ -564,9 +631,9 @@ export default function KanbanPage() {
 		}
 
 		try {
-			await attachExistingAsset(projectId, {
+			const attachedAsset = await attachExistingAsset(projectId, {
 				filename: asset.filename,
-				type: 'image',
+				type: isMesh ? 'mesh' : 'image',
 				name: asset.name,
 				metadata: {
 					resolution: 'Unknown',
@@ -575,17 +642,23 @@ export default function KanbanPage() {
 					cardId
 				}
 			});
+			if (isMesh) {
+				await moveCardToMeshGen(cardId);
+				await ensureGeneratedMeshThumbnails(attachedAsset);
+			}
 			await refreshProjectAssets();
-			// Close the draft card
+			// Close the draft card(s)
 			setImageDraft(null);
+			setMeshDraft(null);
 		} catch (err) {
 			console.error('Failed to attach asset to card:', err);
 			showStatusMessage(err.message || 'Failed to attach asset from library', 'error');
 		} finally {
 			setAssetSelectorOpen(false);
 			setPendingAssetCardId(null);
+			setAssetSelectorType('image');
 		}
-  }, [attachExistingAsset, pendingAssetCardId, projectId, refreshProjectAssets]);
+  }, [assetSelectorType, attachExistingAsset, pendingAssetCardId, projectId, refreshProjectAssets, moveCardToMeshGen, ensureGeneratedMeshThumbnails]);
 
   const imageCards = useMemo(() => {
     const cards = new Map()
@@ -864,6 +937,372 @@ export default function KanbanPage() {
 
   const getDefaultApiForCard = (card) => getApiOptionsForCard(card)[0]?.id || ''
 
+  // ---- "Add New Mesh" (Mesh Gen column) ----------------------------------
+  const selectedMeshComfyWorkflow = meshGenWorkflows.find(workflow => workflow.id == meshDraft?.workflowId) || null
+
+  const openMeshSourceMenu = () => {
+    setMeshDraft({ mode: 'select' })
+  }
+
+  const openMeshLocalFilePicker = () => {
+    meshUploadContextRef.current = { closeDraft: true }
+
+    if (meshFileInputRef.current) {
+      meshFileInputRef.current.value = ''
+      meshFileInputRef.current.click()
+    }
+  }
+
+  const handleMeshFileUpload = async (e) => {
+    const files = Array.from(e.target.files || [])
+    if (files.length === 0) return
+
+    const { closeDraft } = meshUploadContextRef.current
+    const cardId = createImageCardId()
+
+    try {
+      setLoading(true)
+
+      const uploadedAssets = []
+      for (const file of files) {
+        const uploaded = await uploadAsset(projectId, file, 'mesh', {
+          resolution: 'Unknown',
+          format: file.name.split('.').pop()?.toUpperCase() || 'MESH',
+          source: 'IMPORT',
+          cardId
+        })
+        uploadedAssets.push(uploaded)
+      }
+
+      await moveCardToMeshGen(cardId)
+      await ensureGeneratedMeshThumbnails(uploadedAssets)
+      await refreshProjectAssets()
+
+      if (closeDraft) {
+        setMeshDraft(null)
+      }
+    } catch (err) {
+      console.error('Mesh upload failed:', err)
+      showStatusMessage(err.message || 'Mesh upload failed', 'error')
+    } finally {
+      setLoading(false)
+      e.target.value = ''
+      meshUploadContextRef.current = { closeDraft: true }
+    }
+  }
+
+  const openMeshAssetLibrary = async () => {
+    try {
+      await getLibraryAssets() // preload library if needed
+      setPendingAssetCardId(null)
+      setAssetSelectorType('mesh')
+      setAssetSelectorOpen(true)
+    } catch (err) {
+      console.error('Failed to load mesh library:', err)
+      showStatusMessage(err.message || 'Failed to load meshes library', 'error')
+    }
+  }
+
+  const openMeshComfyDraft = () => {
+    if (meshGenWorkflows.length === 0) {
+      showStatusMessage('No compatible ComfyUI workflows available. Import a workflow with at least one mesh output.', 'error')
+      return
+    }
+
+    setMeshDraft({
+      ...getComfyDraftFromWorkflow(meshGenWorkflows[0]),
+      cardId: null
+    })
+  }
+
+  const handleMeshComfyWorkflowChange = (workflowId) => {
+    const workflow = meshGenWorkflows.find(item => item.id == workflowId)
+    setMeshDraft({
+      ...getComfyDraftFromWorkflow(workflow),
+      cardId: null
+    })
+  }
+
+  const handleMeshComfyInputChange = (parameter, rawValue) => {
+    const valueType = getWorkflowParameterValueType(parameter)
+    let nextValue = rawValue
+
+    if (['image', 'video', 'mesh'].includes(valueType)) {
+      nextValue = rawValue
+    } else if (valueType === 'boolean') {
+      nextValue = Boolean(rawValue)
+    } else if (parameter.type === 'number' || valueType === 'number') {
+      nextValue = rawValue
+    } else if (parameter.type === 'json' && typeof rawValue === 'string') {
+      nextValue = rawValue
+    }
+
+    setMeshDraft(prev => ({
+      ...prev,
+      inputs: {
+        ...(prev?.inputs || {}),
+        [parameter.id]: nextValue
+      }
+    }))
+  }
+
+  const handleGenerateMesh = async (draft) => {
+    if (draft.mode === 'comfy') {
+      if (!draft?.workflowId) return
+
+      const workflow = comfyWorkflows.find(item => item.id == draft.workflowId)
+      if (!workflow) {
+        showStatusMessage('Select a valid ComfyUI workflow.', 'error')
+        return
+      }
+
+      for (const parameter of workflow.parameters || []) {
+        const valueType = getWorkflowParameterValueType(parameter)
+        const currentValue = draft.inputs?.[parameter.id]
+
+        if (['image', 'video', 'mesh'].includes(valueType) && !currentValue) {
+          showStatusMessage(`Select a ${valueType} file for ${parameter.name}.`, 'error')
+          return
+        }
+
+        if (valueType === 'string' && !String(currentValue ?? '').trim()) {
+          showStatusMessage(`Enter a value for ${parameter.name}.`, 'error')
+          return
+        }
+      }
+
+      const cardId = draft.cardId || createImageCardId()
+
+      try {
+        const comfyClientId = createComfyExecutionId('comfy-client')
+        const promptId = createComfyExecutionId('comfy-prompt')
+
+        setPendingMeshGeneration({
+          title: workflow.name,
+          source: 'ComfyUI',
+          detail: 'Preparing ComfyUI workflow',
+          progressPercent: 0,
+          currentNodeLabel: 'Waiting for ComfyUI execution to start',
+          promptId
+        })
+        setMeshDraft(null)
+        setLoading(true)
+        openPendingMeshProgressSubscription(promptId)
+        const generatedMeshes = await runComfyWorkflow(projectId, {
+          workflowId: draft.workflowId,
+          inputs: draft.inputs || {},
+          cardId,
+          clientId: comfyClientId,
+          promptId
+        })
+        setPendingMeshGeneration(prev => prev ? {
+          ...prev,
+          progressPercent: 100,
+          detail: 'Saving generated mesh',
+          currentNodeLabel: 'Generated mesh received'
+        } : prev)
+        await persistWorkflowDefaultsIfRequested(draft, workflow)
+        await moveCardToMeshGen(cardId)
+        await ensureGeneratedMeshThumbnails(generatedMeshes)
+        await refreshProjectAssets()
+      } catch (err) {
+        console.error('ComfyUI mesh workflow failed:', err)
+        setMeshDraft(draft)
+        showStatusMessage(err.message || 'ComfyUI workflow failed', 'error')
+        await refreshProjectAssets().catch(refreshErr => {
+          console.error('Failed to refresh project assets after ComfyUI workflow error:', refreshErr)
+        })
+      } finally {
+        closePendingMeshProgressSubscription()
+        setPendingMeshGeneration(null)
+        setLoading(false)
+      }
+
+      return
+    }
+
+    // Remote API (text-to-mesh). Tencent Cloud / Tripo AI queue an async job and
+    // persist a processing card in the Mesh Gen column, polled via GET RESULT.
+    if (!draft?.prompt?.trim()) {
+      showStatusMessage('Enter a prompt for mesh generation.', 'error')
+      return
+    }
+
+    const name = String(draft.name || '').trim()
+    if (!name) {
+      showStatusMessage('Add a name for the generated mesh.', 'error')
+      return
+    }
+
+    const prompt = draft.prompt.trim()
+    const cardId = createImageCardId()
+    const isTencentMeshApi = isTencentMeshGenerationApi(draft.selectedApi)
+    const isTripoMeshApi = isTripoMeshGenerationApi(draft.selectedApi)
+    const isTripoP1Model = isTripoMeshApi && (draft.modelVersion || 'v2.5-20250123') === 'P1-20260311'
+    const providerLabel = isTencentMeshApi
+      ? 'Tencent Cloud'
+      : isTripoMeshApi
+        ? 'Tripo AI'
+        : (meshGenerationApis.find(api => api.id === draft.selectedApi)?.name || 'Remote API')
+
+    try {
+      setPendingMeshGeneration({
+        selectedApi: draft.selectedApi,
+        title: name,
+        source: providerLabel,
+        detail: 'Submitting mesh generation request'
+      })
+      setMeshDraft(null)
+      setLoading(true)
+
+      if (isTencentMeshApi) {
+        const queuedJob = await runMeshGenerationApi(projectId, {
+          name,
+          selectedApi: draft.selectedApi,
+          prompt,
+          cardId,
+          region: draft.region,
+          modelVersion: draft.modelVersion,
+          enablePBR: draft.enablePBR,
+          faceCount: Number(draft.faceCount) || 500000,
+          generationType: draft.generationType,
+          polygonType: draft.generationType === 'LowPoly' ? draft.polygonType : undefined
+        })
+
+        setImageEditProgressByCardId(prev => ({
+          ...prev,
+          [cardId]: {
+            status: 'processing',
+            source: queuedJob.provider || 'Tencent Cloud',
+            detail: 'Tencent Cloud job submitted. Use GET RESULT to refresh status.',
+            currentNodeLabel: 'Tencent Cloud job is queued',
+            jobStatus: 'WAIT',
+            jobId: queuedJob.jobId,
+            promptId: queuedJob.jobId,
+            region: queuedJob.region || draft.region,
+            selectedApi: queuedJob.selectedApi || draft.selectedApi,
+            name,
+            prompt,
+            modelVersion: draft.modelVersion,
+            generationType: draft.generationType,
+            polygonType: draft.polygonType,
+            enablePBR: draft.enablePBR,
+            faceCount: Number(draft.faceCount) || 500000
+          }
+        }))
+
+        await refreshProjectAssets()
+        showStatusMessage('Tencent Cloud mesh job submitted.', 'info')
+        return
+      }
+
+      if (isTripoMeshApi) {
+        const queuedTask = await runMeshGenerationApi(projectId, {
+          name,
+          selectedApi: draft.selectedApi,
+          prompt,
+          cardId,
+          modelVersion: draft.modelVersion || 'v2.5-20250123',
+          modelSeed: draft.modelSeed,
+          faceLimit: draft.faceLimit,
+          texture: draft.texture,
+          pbr: draft.pbr,
+          textureSeed: draft.textureSeed,
+          textureQuality: draft.textureQuality || 'standard',
+          autoSize: draft.autoSize,
+          exportUv: draft.exportUv,
+          ...(isTripoP1Model
+            ? {}
+            : {
+                enableImageAutofix: draft.enableImageAutofix,
+                textureAlignment: draft.textureAlignment || 'original_image',
+                orientation: draft.orientation || 'default',
+                quad: draft.quad,
+                smartLowPoly: draft.smartLowPoly,
+                generateParts: draft.generateParts,
+                geometryQuality: draft.geometryQuality || 'standard'
+              })
+        })
+
+        setImageEditProgressByCardId(prev => ({
+          ...prev,
+          [cardId]: {
+            status: 'processing',
+            source: queuedTask.provider || 'Tripo AI',
+            detail: 'Tripo AI task submitted. Use GET RESULT to refresh status.',
+            currentNodeLabel: 'Tripo AI task is queued',
+            taskStatus: 'queued',
+            taskId: queuedTask.taskId,
+            promptId: queuedTask.taskId,
+            selectedApi: queuedTask.selectedApi || draft.selectedApi,
+            name,
+            prompt,
+            modelVersion: draft.modelVersion || 'v2.5-20250123',
+            modelSeed: draft.modelSeed,
+            enableImageAutofix: draft.enableImageAutofix,
+            faceLimit: draft.faceLimit,
+            texture: draft.texture,
+            pbr: draft.pbr,
+            textureSeed: draft.textureSeed,
+            textureAlignment: draft.textureAlignment || 'original_image',
+            textureQuality: draft.textureQuality || 'standard',
+            autoSize: draft.autoSize,
+            orientation: draft.orientation || 'default',
+            quad: draft.quad,
+            smartLowPoly: draft.smartLowPoly,
+            generateParts: draft.generateParts,
+            exportUv: draft.exportUv,
+            geometryQuality: draft.geometryQuality || 'standard'
+          }
+        }))
+
+        await refreshProjectAssets()
+        showStatusMessage('Tripo AI mesh task submitted.', 'info')
+        return
+      }
+
+      // Custom mesh-generation API (runs synchronously and returns the mesh).
+      const generatedMesh = await runMeshGenerationApi(projectId, {
+        name,
+        selectedApi: draft.selectedApi,
+        prompt,
+        cardId
+      })
+      await ensureGeneratedMeshThumbnails(generatedMesh)
+      await refreshProjectAssets()
+      showStatusMessage('Mesh generation completed successfully.', 'success')
+    } catch (err) {
+      console.error('Mesh generation failed:', err)
+      setMeshDraft(draft)
+      const failureMessage = err.message || 'Mesh generation failed'
+      showStatusMessage(failureMessage, 'error')
+      pushExternalApiFailureNotification('Mesh generation failed', failureMessage, providerLabel)
+    } finally {
+      setPendingMeshGeneration(null)
+      setLoading(false)
+    }
+  }
+
+  const handleMeshApiDraftChange = (field, value) => {
+    setMeshDraft(prev => {
+      if (!prev) return prev
+
+      const nextDraft = { ...prev, [field]: value }
+
+      if (field === 'selectedApi') {
+        nextDraft.modelVersion = isTripoMeshGenerationApi(value)
+          ? (TRIPO_MODEL_VERSION_OPTIONS.includes(nextDraft.modelVersion) ? nextDraft.modelVersion : 'v2.5-20250123')
+          : (TENCENT_MODEL_VERSION_OPTIONS.includes(nextDraft.modelVersion) ? nextDraft.modelVersion : '3.0')
+      }
+
+      if (field === 'generationType' && value !== 'LowPoly') {
+        nextDraft.polygonType = 'triangle'
+      }
+
+      return nextDraft
+    })
+  }
+
   const pushExternalApiFailureNotification = (title, message, source = 'External API') => {
     addNotification({
       title,
@@ -953,18 +1392,22 @@ export default function KanbanPage() {
 
     if (pendingFocus.type === 'mesh-result') {
       const existingMeshAssetIds = new Set(pendingFocus.existingMeshAssetIds || [])
-      const firstNewMeshIndex = targetCard.meshAssets.findIndex(asset => !existingMeshAssetIds.has(asset.id))
+      // Flatten meshes the same way getCardPreviewItems does (each root followed by
+      // its versions), so a newly generated mesh — root or child — maps to the
+      // carousel page that actually shows it.
+      const meshItemIds = (targetCard.meshAssets || [])
+        .flatMap(asset => [asset.id, ...getAssetChildren(asset).map(child => child.id)])
+      const firstNewMeshIndex = meshItemIds.findIndex(id => !existingMeshAssetIds.has(id))
 
       if (firstNewMeshIndex < 0) {
         return
       }
 
-      const meshIndex = firstNewMeshIndex
       const imageItemCount = (targetCard.assets || []).reduce((count, asset) => count + 1 + getAssetChildren(asset).length, 0)
 
       setImageCardPages(prev => ({
         ...prev,
-        [pendingFocus.cardId]: imageItemCount + meshIndex
+        [pendingFocus.cardId]: imageItemCount + firstNewMeshIndex
       }))
       didApplyFocus = true
     }
@@ -1019,7 +1462,13 @@ export default function KanbanPage() {
           label: asset.name,
           previewFilename: asset.thumbnail || asset.filename,
           isEdit: false
-        }
+        },
+        ...getAssetChildren(asset).map((version, index) => ({
+          value: `edit:${version.filePath}`,
+          label: version.name?.trim() || `Version ${index + 1}`,
+          previewFilename: version.thumbnail || version.filename,
+          isEdit: true
+        }))
       ]
     }))
   }
@@ -1075,15 +1524,26 @@ export default function KanbanPage() {
           asset
         }))
       )),
-      ...((card.meshAssets || []).map(asset => ({
-        key: `mesh:${asset.id}`,
-        name: asset.name,
-        filename: asset.filename,
-        previewFilename: asset.thumbnail || null,
-        assetType: 'mesh',
-        isEdit: false,
-        asset
-      })))
+      ...((card.meshAssets || []).flatMap(asset => ([
+        {
+          key: `mesh:${asset.id}`,
+          name: asset.name,
+          filename: asset.filename,
+          previewFilename: asset.thumbnail || null,
+          assetType: 'mesh',
+          isEdit: false,
+          asset
+        },
+        ...getAssetChildren(asset).map((version, index) => ({
+          key: `mesh-version:${version.filePath}`,
+          name: version.name?.trim() || `Version ${index + 1}`,
+          filename: version.filename,
+          previewFilename: version.thumbnail || null,
+          assetType: 'mesh',
+          isEdit: true,
+          asset: { ...version, type: 'mesh' }
+        }))
+      ])))
     ]
   }
 
@@ -1223,27 +1683,7 @@ export default function KanbanPage() {
       promptSource: defaultPromptOption.id,
       customPrompt: isCustomPrompt ? '' : defaultPromptOption.value,
       promptValue: isCustomPrompt ? '' : defaultPromptOption.value,
-      region: 'eu-frankfurt',
-      modelVersion: '3.0',
-      enablePBR: false,
-      faceCount: 500000,
-      generationType: 'Normal',
-      polygonType: 'triangle',
-      modelSeed: '',
-      enableImageAutofix: false,
-      faceLimit: '',
-      texture: true,
-      pbr: true,
-      textureSeed: '',
-      textureAlignment: 'original_image',
-      textureQuality: 'standard',
-      autoSize: false,
-      orientation: 'default',
-      quad: false,
-      smartLowPoly: false,
-      generateParts: false,
-      exportUv: true,
-      geometryQuality: 'standard'
+      ...getMeshGenApiDefaults()
     }
   }
 
@@ -1407,7 +1847,10 @@ export default function KanbanPage() {
       return
     }
 
-    const existingMeshAssetIds = (card.meshAssets || []).map(asset => asset.id)
+    // Track every mesh item (roots and their versions/children) so the focus
+    // logic can detect a newly generated child mesh, not just new root meshes.
+    const existingMeshAssetIds = (card.meshAssets || [])
+      .flatMap(asset => [asset.id, ...getAssetChildren(asset).map(child => child.id)])
 
     try {
       setImageEditPendingCardId(card.id)
@@ -1533,7 +1976,10 @@ export default function KanbanPage() {
     const isMeshWorkflowCard = isMeshGenCard || isMeshEditCard || isTexturingCard
     const actionLabel = isMeshGenCard ? 'mesh generation' : isMeshEditCard ? 'mesh edit' : isTexturingCard ? 'mesh texturing' : 'image edit'
     const sourceAssetLabel = isMeshEditCard || isTexturingCard ? 'mesh' : 'image'
-    const existingMeshAssetIds = (card.meshAssets || []).map(asset => asset.id)
+    // Track every mesh item (roots and their versions/children) so the focus
+    // logic can detect a newly generated child mesh, not just new root meshes.
+    const existingMeshAssetIds = (card.meshAssets || [])
+      .flatMap(asset => [asset.id, ...getAssetChildren(asset).map(child => child.id)])
     const existingChildCountByAssetId = Object.fromEntries((card.assets || []).map(asset => [asset.id, getAssetChildren(asset).length]))
     const selectedImageSourceGroup = !isMeshWorkflowCard
       ? getCardImageSourceGroups(card).find(group => group.options.some(option => option.value === imageEditDraft.selectedAssetId))
@@ -1773,6 +2219,7 @@ export default function KanbanPage() {
 
         const inputValues = {}
         let primaryAssetId = null
+        let primaryMeshAssetId = null
 
         for (const parameter of workflow.parameters || []) {
           const valueType = getWorkflowParameterValueType(parameter)
@@ -1787,6 +2234,10 @@ export default function KanbanPage() {
             const matchingAssetGroup = getCardFileSourceGroups(card, valueType).find(group => group.options.some(option => option.value === resolvedValue))
             if (!isMeshWorkflowCard && valueType === 'image' && !primaryAssetId && matchingAssetGroup?.asset?.id) {
               primaryAssetId = matchingAssetGroup.asset.id
+            }
+            // Capture the source mesh so the result can be saved as its version.
+            if (valueType === 'mesh' && !primaryMeshAssetId && matchingAssetGroup?.asset?.id) {
+              primaryMeshAssetId = matchingAssetGroup.asset.id
             }
 
             inputValues[parameter.id] = { source: resolvedValue }
@@ -1874,7 +2325,10 @@ export default function KanbanPage() {
             name,
             inputs: inputValues,
             promptId,
-            clientId
+            clientId,
+            // Mesh Edit / Texturing operate on an existing mesh — save the result
+            // as a version (child) of that source mesh.
+            parentAssetId: (isMeshEditCard || isTexturingCard) ? primaryMeshAssetId : null
           })
 
           await ensureGeneratedMeshThumbnails(generatedMeshes)
@@ -1922,6 +2376,10 @@ export default function KanbanPage() {
                 }
               }
             : prev)
+        }
+
+        if (imageEditDraft.setAsDefault && await saveWorkflowDefaults(updateComfyWorkflow, workflow, inputValues)) {
+          await refreshComfyWorkflows()
         }
       }
 
@@ -2067,6 +2525,64 @@ export default function KanbanPage() {
     }
   }
 
+  // True while the browser is dragging files (not an internal card) over the page.
+  const isFileDrag = (event) => Array.from(event.dataTransfer?.types || []).includes('Files')
+
+  const handleColumnFileDragOver = (event, columnId) => {
+    if (draggedCard || !isFileDrag(event)) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'copy'
+    setFileDropColumnId(prev => (prev === columnId ? prev : columnId))
+  }
+
+  const handleColumnFileDragLeave = (event, columnId) => {
+    // Ignore leaves that move to a child element of the same column.
+    if (event.currentTarget.contains(event.relatedTarget)) return
+    setFileDropColumnId(prev => (prev === columnId ? null : prev))
+  }
+
+  // Import dropped image files into Assets and create a single image card in the
+  // column they were dropped on. New assets are created in the Images column
+  // server-side, so cards dropped elsewhere are relocated afterwards.
+  const handleColumnFileDrop = async (event, columnId) => {
+    if (draggedCard || !isFileDrag(event)) return
+    event.preventDefault()
+    setFileDropColumnId(null)
+
+    const files = Array.from(event.dataTransfer?.files || []).filter(file => file.type.startsWith('image/'))
+    if (files.length === 0) {
+      showStatusMessage('Only image files can be dropped here', 'error')
+      return
+    }
+
+    const cardId = createImageCardId()
+
+    try {
+      setLoading(true)
+
+      for (const file of files) {
+        await uploadAsset(projectId, file, 'image', {
+          resolution: 'Unknown',
+          format: file.type.split('/')[1]?.toUpperCase() || 'IMG',
+          source: 'IMPORT',
+          cardId
+        })
+      }
+
+      if (columnId !== IMAGE_CARD_COLUMNS[0].dbId) {
+        const position = projectCards.filter(card => card.kanbanColumnId === columnId).length
+        await moveKanbanCard(projectId, cardId, columnId, position)
+      }
+
+      await Promise.all([refreshProjectAssets(), refreshCardAttributes()])
+    } catch (err) {
+      console.error('Failed to import dropped image:', err)
+      showStatusMessage(err.message || 'Failed to import dropped image', 'error')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const handleAddCustomAttribute = async (cardId) => {
     try {
       await createCardAttribute(projectId, cardId, {
@@ -2146,7 +2662,7 @@ export default function KanbanPage() {
         onDragOver={event => handleCardDragOver(event, columnId, position)}
         onDrop={event => handleCardDrop(event, columnId, position)}
       >
-        {isEmpty && !imageDraft && !pendingImageGeneration && (
+        {isEmpty && !imageDraft && !pendingImageGeneration && !(columnId === MESH_GEN_COLUMN_ID && (meshDraft || pendingMeshGeneration)) && (
           <span className="kanban-drop-zone__label font-label">
             {column?.emptyLabel || 'Drop image cards here'}
           </span>
@@ -2216,7 +2732,12 @@ export default function KanbanPage() {
           <span className="kanban-col__badge font-label">{cards.length.toString().padStart(2, '0')} ITEMS</span>
         </div>
 
-        <div className="kanban-col__content">
+        <div
+          className={`kanban-col__content ${fileDropColumnId === column.dbId ? 'kanban-col__content--file-drop' : ''}`}
+          onDragOver={event => handleColumnFileDragOver(event, column.dbId)}
+          onDragLeave={event => handleColumnFileDragLeave(event, column.dbId)}
+          onDrop={event => handleColumnFileDrop(event, column.dbId)}
+        >
           {cards.length === 0 && renderDropZone(column.dbId, 0, true)}
 
           {cards.map((card, index) => (
@@ -2344,6 +2865,15 @@ export default function KanbanPage() {
                           </div>
                         )}
 
+                        {(selectedComfyWorkflow?.parameters || []).length > 0 && (
+                          <label className="params-card__checkbox-label" style={{ marginTop: '0.5rem' }}>
+                            <div className={`params-card__checkbox ${imageDraft.setAsDefault ? 'params-card__checkbox--checked' : 'params-card__checkbox--unchecked'}`} onClick={() => setImageDraft(prev => ({ ...prev, setAsDefault: !prev?.setAsDefault }))}>
+                              {imageDraft.setAsDefault && <span className="material-symbols-outlined" style={{ fontSize: '10px', color: 'var(--on-tertiary)', fontWeight: 700 }}>check</span>}
+                            </div>
+                            <span>Set as default</span>
+                          </label>
+                        )}
+
                         <button className="gen-btn" onClick={() => handleGenerateImage(imageDraft)}>
                           <span className="material-symbols-outlined">bolt</span>
                           START WORKFLOW
@@ -2439,6 +2969,256 @@ export default function KanbanPage() {
               )}
             </>
           )}
+
+          {meshDraft && column.dbId === MESH_GEN_COLUMN_ID && (
+            <div className="image-card image-card--draft">
+              {meshDraft.mode === 'select' && (
+                <div className="image-card__options">
+                  <span className="font-label" style={{ fontSize: '0.65rem', color: 'var(--primary)', marginBottom: '0.5rem' }}>MESH SOURCE</span>
+                  <button className="option-btn" onClick={() => openMeshLocalFilePicker()}>
+                    <span className="material-symbols-outlined">computer</span>
+                    Local Computer
+                  </button>
+                  <button className="option-btn" onClick={() => openMeshAssetLibrary()}>
+                    <span className="material-symbols-outlined">folder_open</span>
+                    From Assets
+                  </button>
+                  <button className="option-btn" onClick={() => openMeshComfyDraft()}>
+                    <span className="material-symbols-outlined">account_tree</span>
+                    ComfyUI Workflow
+                  </button>
+                  <button className="option-btn" onClick={() => setMeshDraft({ mode: 'api', selectedApi: meshGenerationApis[0]?.id || '', prompt: '', name: '', ...getMeshGenApiDefaults() })}>
+                    <span className="material-symbols-outlined">api</span>
+                    Remote API
+                  </button>
+                  <button className="kanban-sidebar__nav-item" onClick={() => setMeshDraft(null)} style={{ marginTop: '0.5rem', justifyContent: 'center' }}>CANCEL</button>
+                </div>
+              )}
+
+              {meshDraft.mode === 'comfy' && (
+                <div className="image-card__options">
+                  <span className="font-label" style={{ fontSize: '0.65rem', color: 'var(--primary)', marginBottom: '0.5rem' }}>COMFYUI WORKFLOW</span>
+                  {comfyLoading ? (
+                    <div className="image-card__asset-picker-empty">
+                      <span className="material-symbols-outlined image-card__loading-spinner">progress_activity</span>
+                      <span>Loading workflows...</span>
+                    </div>
+                  ) : meshGenWorkflows.length > 0 ? (
+                    <>
+                      <select
+                        className="params-card__select"
+                        value={meshDraft.workflowId}
+                        onChange={e => handleMeshComfyWorkflowChange(e.target.value)}
+                      >
+                        {meshGenWorkflows.map(workflow => (
+                          <option key={workflow.id} value={workflow.id}>{workflow.name}</option>
+                        ))}
+                      </select>
+
+                      <div className="image-card__workflow-meta">
+                        <span>{selectedMeshComfyWorkflow?.parameters?.length || 0} input parameters configured</span>
+                        <span>{selectedMeshComfyWorkflow?.outputs?.length || 0} outputs selected</span>
+                      </div>
+
+                      <div className="gen-section">
+                        {(selectedMeshComfyWorkflow?.parameters || []).length > 0 ? (
+                          <div className="image-card__workflow-params">
+                            {selectedMeshComfyWorkflow.parameters.map(parameter => (
+                              <div key={parameter.id} className="params-card__field">
+                                <label className="params-card__label font-label">
+                                  {parameter.name} • {getWorkflowParameterValueType(parameter).toUpperCase()}
+                                </label>
+
+                                {isFileWorkflowValueType(getWorkflowParameterValueType(parameter)) ? (
+                                  <label className="image-card__file-input">
+                                    <input
+                                      type="file"
+                                      accept={getWorkflowFileInputAccept(getWorkflowParameterValueType(parameter))}
+                                      onChange={e => handleMeshComfyInputChange(parameter, e.target.files?.[0] || null)}
+                                    />
+                                    <span className="material-symbols-outlined">
+                                      {getWorkflowFileInputIcon(getWorkflowParameterValueType(parameter))}
+                                    </span>
+                                    <span>
+                                      {meshDraft.inputs?.[parameter.id]?.name || `Select ${getWorkflowParameterValueType(parameter)} file`}
+                                    </span>
+                                  </label>
+                                ) : getWorkflowParameterValueType(parameter) === 'boolean' ? (
+                                  <label className="params-card__checkbox-label">
+                                    <div className={`params-card__checkbox ${meshDraft.inputs?.[parameter.id] ? 'params-card__checkbox--checked' : 'params-card__checkbox--unchecked'}`} onClick={() => handleMeshComfyInputChange(parameter, !(meshDraft.inputs?.[parameter.id]))}>
+                                      {meshDraft.inputs?.[parameter.id] && <span className="material-symbols-outlined" style={{ fontSize: '10px', color: 'var(--on-tertiary)', fontWeight: 700 }}>check</span>}
+                                    </div>
+                                    <span>{parameter.label || 'Toggle value'}</span>
+                                  </label>
+                                ) : getWorkflowParameterValueType(parameter) === 'string' ? (
+                                  <textarea
+                                    className="gen-prompt-input image-card__param-textarea"
+                                    value={meshDraft.inputs?.[parameter.id] ?? ''}
+                                    onChange={e => handleMeshComfyInputChange(parameter, e.target.value)}
+                                  />
+                                ) : parameter.type === 'json' ? (
+                                  <textarea
+                                    className="gen-prompt-input image-card__param-textarea"
+                                    value={typeof meshDraft.inputs?.[parameter.id] === 'string'
+                                      ? meshDraft.inputs?.[parameter.id]
+                                      : JSON.stringify(meshDraft.inputs?.[parameter.id] ?? parameter.defaultValue, null, 2)}
+                                    onChange={e => handleMeshComfyInputChange(parameter, e.target.value)}
+                                  />
+                                ) : (
+                                  <input
+                                    type={getWorkflowParameterValueType(parameter) === 'number' ? 'number' : 'text'}
+                                    className="params-card__input"
+                                    value={meshDraft.inputs?.[parameter.id] ?? ''}
+                                    onChange={e => handleMeshComfyInputChange(parameter, e.target.value)}
+                                  />
+                                )}
+
+                                <span className="image-card__param-hint">
+                                  {parameter.label} • default: {formatWorkflowDefaultValue(parameter.defaultValue)}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="image-card__asset-picker-empty image-card__asset-picker-empty--compact">
+                            <span className="material-symbols-outlined">tune</span>
+                            <span>This workflow has no exposed parameters. Start it directly.</span>
+                          </div>
+                        )}
+
+                        {(selectedMeshComfyWorkflow?.parameters || []).length > 0 && (
+                          <label className="params-card__checkbox-label" style={{ marginTop: '0.5rem' }}>
+                            <div className={`params-card__checkbox ${meshDraft.setAsDefault ? 'params-card__checkbox--checked' : 'params-card__checkbox--unchecked'}`} onClick={() => setMeshDraft(prev => ({ ...prev, setAsDefault: !prev?.setAsDefault }))}>
+                              {meshDraft.setAsDefault && <span className="material-symbols-outlined" style={{ fontSize: '10px', color: 'var(--on-tertiary)', fontWeight: 700 }}>check</span>}
+                            </div>
+                            <span>Set as default</span>
+                          </label>
+                        )}
+
+                        <button className="gen-btn" onClick={() => handleGenerateMesh(meshDraft)}>
+                          <span className="material-symbols-outlined">bolt</span>
+                          START WORKFLOW
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="image-card__asset-picker-empty">
+                      <span className="material-symbols-outlined">account_tree</span>
+                      <span>No mesh workflows available. Open the Library page to import one.</span>
+                    </div>
+                  )}
+                  <button className="kanban-sidebar__nav-item" onClick={() => openMeshSourceMenu()} style={{ justifyContent: 'center' }}>BACK</button>
+                </div>
+              )}
+
+              {meshDraft.mode === 'api' && (
+                <div className="image-card__options">
+                  <span className="font-label" style={{ fontSize: '0.65rem', color: 'var(--primary)', marginBottom: '0.5rem' }}>REMOTE API</span>
+                  {meshGenerationApis.length > 0 ? (
+                    <>
+                      <div className="params-card__field">
+                        <label className="params-card__label font-label">API</label>
+                        <select
+                          className="image-card__attribute-select"
+                          value={meshDraft.selectedApi}
+                          onChange={e => handleMeshApiDraftChange('selectedApi', e.target.value)}
+                        >
+                          {meshGenerationApis.map(api => (
+                            <option key={api.id} value={api.id}>{api.name}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="params-card__field">
+                        <label className="params-card__label font-label">Name</label>
+                        <input
+                          type="text"
+                          className="params-card__input"
+                          placeholder="Enter mesh name"
+                          value={meshDraft.name}
+                          onChange={e => handleMeshApiDraftChange('name', e.target.value)}
+                        />
+                      </div>
+
+                      <div className="params-card__field">
+                        <label className="params-card__label font-label">Prompt</label>
+                        <textarea
+                          className="gen-prompt-input"
+                          placeholder="Describe the 3D model to generate"
+                          value={meshDraft.prompt}
+                          onChange={e => handleMeshApiDraftChange('prompt', e.target.value)}
+                        />
+                      </div>
+
+                      <MeshGenApiOptions draft={meshDraft} onChange={handleMeshApiDraftChange} />
+
+                      <div className="gen-section">
+                        <button className="gen-btn" onClick={() => handleGenerateMesh(meshDraft)}>
+                          <span className="material-symbols-outlined">auto_awesome</span>
+                          GENERATE
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="image-card__asset-picker-empty">
+                      <span className="material-symbols-outlined">api</span>
+                      <span>No mesh generation APIs available. Configure one in Settings.</span>
+                    </div>
+                  )}
+                  <button className="kanban-sidebar__nav-item" onClick={() => openMeshSourceMenu()} style={{ justifyContent: 'center' }}>BACK</button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {pendingMeshGeneration && column.dbId === MESH_GEN_COLUMN_ID && (
+            <div className="image-card image-card--loading" id="mesh-card-loading">
+              <div className="image-card__thumb image-card__thumb--loading">
+                <div className="image-card__loading-state">
+                  <span className="material-symbols-outlined image-card__loading-spinner">progress_activity</span>
+                  <span className="font-label image-card__loading-label">
+                    {Number.isFinite(pendingMeshGeneration.progressPercent) ? `${pendingMeshGeneration.progressPercent}%` : 'Processing mesh...'}
+                  </span>
+                </div>
+              </div>
+              <div className="image-card__info">
+                <div className="image-card__row">
+                  <h3 className="image-card__name">{pendingMeshGeneration.title}</h3>
+                  <span className="image-card__source image-card__source--loading">PENDING</span>
+                </div>
+                <p className="image-card__meta font-label">{pendingMeshGeneration.source} • {pendingMeshGeneration.detail}</p>
+                {pendingMeshGeneration.currentNodeLabel && (
+                  <p className="image-card__meta font-label image-card__meta--loading-node">{pendingMeshGeneration.currentNodeLabel}</p>
+                )}
+                <div className="image-card__progress" aria-hidden="true">
+                  <div
+                    className="image-card__progress-bar"
+                    style={{ width: `${Math.max(0, Math.min(100, pendingMeshGeneration.progressPercent || 0))}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {column.dbId === MESH_GEN_COLUMN_ID && (
+            <>
+              <input
+                type="file"
+                accept={getWorkflowFileInputAccept('mesh')}
+                multiple
+                style={{ display: 'none' }}
+                onChange={handleMeshFileUpload}
+                ref={meshFileInputRef}
+              />
+
+              {!meshDraft && !pendingMeshGeneration && (
+                <button className="kanban-col__add-btn" id="add-mesh-btn" onClick={() => openMeshSourceMenu()}>
+                  <span className="material-symbols-outlined">deployed_code</span>
+                  <span className="font-label">ADD NEW MESH</span>
+                </button>
+              )}
+            </>
+          )}
         </div>
       </div>
     )
@@ -2474,6 +3254,8 @@ export default function KanbanPage() {
 						setPendingAssetCardId(null);
 						// Optionally clear the draft if it was open
 						if (imageDraft?.mode === 'assets') setImageDraft(null);
+						if (assetSelectorType === 'mesh') setMeshDraft(null);
+						setAssetSelectorType('image');
 					}}
 				/>
 			)}
