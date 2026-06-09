@@ -1,6 +1,7 @@
 // Renders a single non-image ComfyUI workflow parameter (boolean checkbox or
 // text/number input). Shared by the AI control panels. Presentational.
 import { getValueType } from '../../../utils/imageEditorCanvas'
+import ComfyTextButton from '../../comfy/ComfyTextButton'
 
 export default function WorkflowParameterField({ parameter, value, onChange }) {
   const valueType = getValueType(parameter)
@@ -18,15 +19,35 @@ export default function WorkflowParameterField({ parameter, value, onChange }) {
     )
   }
 
+  if (valueType === 'number') {
+    return (
+      <label className="image-editor-label">
+        {parameter.name}
+        <input
+          className="image-editor-input"
+          type="number"
+          value={value ?? ''}
+          onChange={event => onChange(parameter.id, event.target.value)}
+        />
+      </label>
+    )
+  }
+
   return (
     <label className="image-editor-label">
       {parameter.name}
-      <input
-        className="image-editor-input"
-        type={valueType === 'number' ? 'number' : 'text'}
-        value={value ?? ''}
-        onChange={event => onChange(parameter.id, event.target.value)}
-      />
+      <span className="comfy-textfield-wrap">
+        <input
+          className="image-editor-input"
+          type="text"
+          value={value ?? ''}
+          onChange={event => onChange(parameter.id, event.target.value)}
+        />
+        <ComfyTextButton
+          className="comfy-text-btn--corner"
+          onResult={text => onChange(parameter.id, text)}
+        />
+      </span>
     </label>
   )
 }

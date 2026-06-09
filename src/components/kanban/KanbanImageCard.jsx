@@ -1,5 +1,6 @@
 import Viewer from '../Viewer'
 import MeshGenApiOptions from './MeshGenApiOptions'
+import ComfyTextButton from '../comfy/ComfyTextButton'
 import {
   buildMeshEditorPath,
   canFetchTencentMeshResult,
@@ -465,12 +466,18 @@ export default function KanbanImageCard({
                       <div className="params-card__field">
                         <label className="params-card__label font-label">{isMeshGenCard && (isTencentMeshGenerationApi(imageEditDraft.selectedApi) || isTripoMeshGenerationApi(imageEditDraft.selectedApi)) ? 'Prompt' : 'Prompt Source'}</label>
                         {isMeshGenCard && (isTencentMeshGenerationApi(imageEditDraft.selectedApi) || isTripoMeshGenerationApi(imageEditDraft.selectedApi)) ? (
-                          <textarea
-                            className="gen-prompt-input"
-                            value={imageEditDraft.prompt || ''}
-                            onChange={event => handleImageEditDraftChange(card, 'prompt', event.target.value)}
-                            placeholder="Describe the mesh to generate"
-                          />
+                          <div className="comfy-textfield-wrap">
+                            <textarea
+                              className="gen-prompt-input"
+                              value={imageEditDraft.prompt || ''}
+                              onChange={event => handleImageEditDraftChange(card, 'prompt', event.target.value)}
+                              placeholder="Describe the mesh to generate"
+                            />
+                            <ComfyTextButton
+                              className="comfy-text-btn--corner"
+                              onResult={text => handleImageEditDraftChange(card, 'prompt', text)}
+                            />
+                          </div>
                         ) : (
                           <select
                             className="image-card__attribute-select"
@@ -487,12 +494,18 @@ export default function KanbanImageCard({
                       {(!isMeshGenCard || (!isTencentMeshGenerationApi(imageEditDraft.selectedApi) && !isTripoMeshGenerationApi(imageEditDraft.selectedApi))) && imageEditDraft.promptSource === 'custom' && (
                         <div className="params-card__field">
                           <label className="params-card__label font-label">Custom Prompt</label>
-                          <textarea
-                            className="gen-prompt-input"
-                            value={imageEditDraft.customPrompt}
-                            onChange={event => handleImageEditDraftChange(card, 'customPrompt', event.target.value)}
-                            placeholder="Enter a custom prompt"
-                          />
+                          <div className="comfy-textfield-wrap">
+                            <textarea
+                              className="gen-prompt-input"
+                              value={imageEditDraft.customPrompt}
+                              onChange={event => handleImageEditDraftChange(card, 'customPrompt', event.target.value)}
+                              placeholder="Enter a custom prompt"
+                            />
+                            <ComfyTextButton
+                              className="comfy-text-btn--corner"
+                              onResult={text => handleImageEditDraftChange(card, 'customPrompt', text)}
+                            />
+                          </div>
                         </div>
                       )}
 
@@ -582,13 +595,21 @@ export default function KanbanImageCard({
                                 ))}
                               </select>
                               {valueType === 'string' ? (
-                                <textarea
-                                  className="gen-prompt-input image-card__param-textarea"
-                                  value={binding.source === 'custom' ? (binding.customValue ?? '') : String(resolvedValue ?? '')}
-                                  onChange={event => handleImageEditParameterValueChange(card, parameter, event.target.value)}
-                                  disabled={binding.source !== 'custom'}
-                                  placeholder={`Enter ${valueType} value`}
-                                />
+                                <div className="comfy-textfield-wrap">
+                                  <textarea
+                                    className="gen-prompt-input image-card__param-textarea"
+                                    value={binding.source === 'custom' ? (binding.customValue ?? '') : String(resolvedValue ?? '')}
+                                    onChange={event => handleImageEditParameterValueChange(card, parameter, event.target.value)}
+                                    disabled={binding.source !== 'custom'}
+                                    placeholder={`Enter ${valueType} value`}
+                                  />
+                                  {binding.source === 'custom' && (
+                                    <ComfyTextButton
+                                      className="comfy-text-btn--corner"
+                                      onResult={text => handleImageEditParameterValueChange(card, parameter, text)}
+                                    />
+                                  )}
+                                </div>
                               ) : (
                                 <input
                                   type={valueType === 'number' ? 'number' : 'text'}

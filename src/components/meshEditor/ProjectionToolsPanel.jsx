@@ -1,4 +1,5 @@
 import { getWorkflowValueType } from '../../utils/meshTexturing'
+import ComfyTextButton from '../comfy/ComfyTextButton'
 
 // Projection-mode left panel (projection setup, AI workflow + image-input
 // config) extracted from MeshEditorPage.jsx. Presentational: state + handlers
@@ -205,15 +206,24 @@ export default function ProjectionToolsPanel({
                   {currentValue ? 'Enabled' : 'Disabled'}
                 </button>
               ) : valueType === 'string' ? (
-                <textarea
-                  className="mesh-editor-panel__input mesh-editor-panel__textarea"
-                  value={currentValue ?? ''}
-                  onChange={event => setProjectionWorkflowInputs(current => ({
-                    ...current,
-                    [parameter.id]: event.target.value
-                  }))}
-                  disabled={!!texturingUnavailableReason || projecting || projectionRebuilding}
-                />
+                <span className="comfy-textfield-wrap">
+                  <textarea
+                    className="mesh-editor-panel__input mesh-editor-panel__textarea"
+                    value={currentValue ?? ''}
+                    onChange={event => setProjectionWorkflowInputs(current => ({
+                      ...current,
+                      [parameter.id]: event.target.value
+                    }))}
+                    disabled={!!texturingUnavailableReason || projecting || projectionRebuilding}
+                  />
+                  <ComfyTextButton
+                    className="comfy-text-btn--corner"
+                    onResult={text => setProjectionWorkflowInputs(current => ({
+                      ...current,
+                      [parameter.id]: text
+                    }))}
+                  />
+                </span>
               ) : (
                 <input
                   type="number"

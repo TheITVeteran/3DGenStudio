@@ -14,6 +14,7 @@ import {
   isFileWorkflowValueType,
   resolveSelectedInputSource
 } from '../../utils/graphHelpers'
+import ComfyTextButton from '../comfy/ComfyTextButton'
 
 // Value node for Number / Text / Boolean outputs. Text nodes also accept inputs
 // and can run text-generating ComfyUI workflows.
@@ -77,11 +78,17 @@ const GraphValueNode = memo(function GraphValueNode({ data }) {
 
       if (valueType === 'string' || parameter.type === 'json') {
         return (
-          <textarea
-            className="gen-prompt-input image-card__param-textarea nodrag"
-            value={typeof currentValue === 'string' ? currentValue : JSON.stringify(currentValue ?? '', null, 2)}
-            onChange={event => data.onDraftInputChange?.(data.id, parameter, event.target.value)}
-          />
+          <div className="comfy-textfield-wrap nodrag">
+            <textarea
+              className="gen-prompt-input image-card__param-textarea nodrag"
+              value={typeof currentValue === 'string' ? currentValue : JSON.stringify(currentValue ?? '', null, 2)}
+              onChange={event => data.onDraftInputChange?.(data.id, parameter, event.target.value)}
+            />
+            <ComfyTextButton
+              className="comfy-text-btn--corner"
+              onResult={text => data.onDraftInputChange?.(data.id, parameter, text)}
+            />
+          </div>
         )
       }
 
@@ -198,13 +205,22 @@ const GraphValueNode = memo(function GraphValueNode({ data }) {
           <span className="graph-node__panel-title font-label">VALUE</span>
 
           {nodeKind === 'text' ? (
-            <textarea
-              className="gen-prompt-input graph-node__value-input graph-node__value-input--textarea nodrag"
-              value={String(outputValue ?? '')}
-              placeholder="Type text or generate it with a workflow"
-              onChange={event => data.onNodeOutputValueChange?.(data.id, event.target.value)}
-              onBlur={event => data.onNodeOutputValueCommit?.(data.id, event.target.value)}
-            />
+            <div className="comfy-textfield-wrap nodrag">
+              <textarea
+                className="gen-prompt-input graph-node__value-input graph-node__value-input--textarea nodrag"
+                value={String(outputValue ?? '')}
+                placeholder="Type text or generate it with a workflow"
+                onChange={event => data.onNodeOutputValueChange?.(data.id, event.target.value)}
+                onBlur={event => data.onNodeOutputValueCommit?.(data.id, event.target.value)}
+              />
+              <ComfyTextButton
+                className="comfy-text-btn--corner"
+                onResult={text => {
+                  data.onNodeOutputValueChange?.(data.id, text)
+                  data.onNodeOutputValueCommit?.(data.id, text)
+                }}
+              />
+            </div>
           ) : nodeKind === 'boolean' ? (
             <button
               type="button"

@@ -1,4 +1,5 @@
 import { getWorkflowValueType } from '../../utils/meshTexturing'
+import ComfyTextButton from '../comfy/ComfyTextButton'
 
 // Texturing-mode left panel (brush/crop/feather, AI workflow + image-input
 // config, patch review sliders) extracted from MeshEditorPage.jsx.
@@ -175,12 +176,18 @@ export default function TexturingToolsPanel({
                   {currentValue ? 'Enabled' : 'Disabled'}
                 </button>
               ) : valueType === 'string' ? (
-                <textarea
-                  className="mesh-editor-panel__input mesh-editor-panel__textarea"
-                  value={currentValue ?? ''}
-                  onChange={event => handleTextureWorkflowInputChange(parameter, event.target.value)}
-                  disabled={!!texturingUnavailableReason || !!pendingPatch}
-                />
+                <span className="comfy-textfield-wrap">
+                  <textarea
+                    className="mesh-editor-panel__input mesh-editor-panel__textarea"
+                    value={currentValue ?? ''}
+                    onChange={event => handleTextureWorkflowInputChange(parameter, event.target.value)}
+                    disabled={!!texturingUnavailableReason || !!pendingPatch}
+                  />
+                  <ComfyTextButton
+                    className="comfy-text-btn--corner"
+                    onResult={text => handleTextureWorkflowInputChange(parameter, text)}
+                  />
+                </span>
               ) : (
                 <input
                   type="number"

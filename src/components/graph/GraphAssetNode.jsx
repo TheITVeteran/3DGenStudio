@@ -35,6 +35,7 @@ import {
   resolveImageSourceOption,
   resolveSelectedInputSource
 } from '../../utils/graphHelpers'
+import ComfyTextButton from '../comfy/ComfyTextButton'
 
 // Image / mesh asset node. Handles preview (incl. 3D mesh viewer), generation
 // and edit action panels (local / assets / API / ComfyUI), and async mesh polling.
@@ -169,11 +170,17 @@ const GraphAssetNode = memo(function GraphAssetNode({ data }) {
 
       if (valueType === 'string' || parameter.type === 'json') {
         return (
-          <textarea
-            className="gen-prompt-input image-card__param-textarea nodrag"
-            value={typeof currentValue === 'string' ? currentValue : JSON.stringify(currentValue ?? '', null, 2)}
-            onChange={event => data.onDraftInputChange?.(data.id, parameter, event.target.value)}
-          />
+          <div className="comfy-textfield-wrap nodrag">
+            <textarea
+              className="gen-prompt-input image-card__param-textarea nodrag"
+              value={typeof currentValue === 'string' ? currentValue : JSON.stringify(currentValue ?? '', null, 2)}
+              onChange={event => data.onDraftInputChange?.(data.id, parameter, event.target.value)}
+            />
+            <ComfyTextButton
+              className="comfy-text-btn--corner"
+              onResult={text => data.onDraftInputChange?.(data.id, parameter, text)}
+            />
+          </div>
         )
       }
 
@@ -528,12 +535,18 @@ const GraphAssetNode = memo(function GraphAssetNode({ data }) {
                       <option key={api.id} value={api.id}>{api.name}</option>
                     ))}
                   </select>
-                  <textarea
-                    className="gen-prompt-input nodrag"
-                    placeholder="What should we generate?"
-                    value={draft.prompt || ''}
-                    onChange={event => data.onDraftFieldChange?.(data.id, 'prompt', event.target.value)}
-                  />
+                  <div className="comfy-textfield-wrap nodrag">
+                    <textarea
+                      className="gen-prompt-input nodrag"
+                      placeholder="What should we generate?"
+                      value={draft.prompt || ''}
+                      onChange={event => data.onDraftFieldChange?.(data.id, 'prompt', event.target.value)}
+                    />
+                    <ComfyTextButton
+                      className="comfy-text-btn--corner"
+                      onResult={text => data.onDraftFieldChange?.(data.id, 'prompt', text)}
+                    />
+                  </div>
                   <button className="gen-btn nodrag" onClick={() => data.onRunNodeAction?.(data.id)} disabled={!draft.name?.trim() || !draft.prompt?.trim()}>
                     <span className="material-symbols-outlined">auto_awesome</span>
                     GENERATE

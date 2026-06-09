@@ -13,6 +13,7 @@ import './KanbanPage.css'
 import AssetSelectorModal from '../components/AssetSelectorModal';
 import KanbanImageCard from '../components/kanban/KanbanImageCard'
 import MeshGenApiOptions from '../components/kanban/MeshGenApiOptions'
+import ComfyTextButton from '../components/comfy/ComfyTextButton'
 import {
   DEFAULT_ATTRIBUTE_TYPE_ID,
   IMAGE_API_LIST,
@@ -2830,11 +2831,17 @@ export default function KanbanPage() {
                                     <span>{parameter.label || 'Toggle value'}</span>
                                   </label>
                                 ) : getWorkflowParameterValueType(parameter) === 'string' ? (
-                                  <textarea
-                                    className="gen-prompt-input image-card__param-textarea"
-                                    value={imageDraft.inputs?.[parameter.id] ?? ''}
-                                    onChange={e => handleComfyInputChange(parameter, e.target.value)}
-                                  />
+                                  <div className="comfy-textfield-wrap">
+                                    <textarea
+                                      className="gen-prompt-input image-card__param-textarea"
+                                      value={imageDraft.inputs?.[parameter.id] ?? ''}
+                                      onChange={e => handleComfyInputChange(parameter, e.target.value)}
+                                    />
+                                    <ComfyTextButton
+                                      className="comfy-text-btn--corner"
+                                      onResult={text => handleComfyInputChange(parameter, text)}
+                                    />
+                                  </div>
                                 ) : parameter.type === 'json' ? (
                                   <textarea
                                     className="gen-prompt-input image-card__param-textarea"
@@ -2904,12 +2911,18 @@ export default function KanbanPage() {
                   </select>
 
                   <div className="gen-section">
-                    <textarea
-                      className="gen-prompt-input"
-                      placeholder="What should we generate?"
-                      value={imageDraft.prompt}
-                      onChange={e => setImageDraft({ ...imageDraft, prompt: e.target.value })}
-                    />
+                    <div className="comfy-textfield-wrap">
+                      <textarea
+                        className="gen-prompt-input"
+                        placeholder="What should we generate?"
+                        value={imageDraft.prompt}
+                        onChange={e => setImageDraft({ ...imageDraft, prompt: e.target.value })}
+                      />
+                      <ComfyTextButton
+                        className="comfy-text-btn--corner"
+                        onResult={text => setImageDraft(prev => ({ ...prev, prompt: text }))}
+                      />
+                    </div>
                     <button className="gen-btn" onClick={() => handleGenerateImage(imageDraft)}>
                       <span className="material-symbols-outlined">auto_awesome</span>
                       GENERATE

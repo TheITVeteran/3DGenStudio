@@ -1,0 +1,55 @@
+.comfy-text-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  background: var(--surface-container, #181a1c);
+  cursor: pointer;
+  flex: 0 0 auto;
+  transition: background var(--transition-base, 200ms ease), border-color var(--transition-base, 200ms ease), transform var(--transition-base, 200ms ease);
+}
+
+.comfy-text-btn:hover {
+  background: var(--surface-container-high, #222);
+  border-color: var(--primary, #8ff5ff);
+  transform: translateY(-1px);
+}
+
+.comfy-text-btn__icon {
+  width: 1rem;
+  height: 1rem;
+  object-fit: contain;
+  display: block;
+}
+
+/* Variant: pin the button to the top-right corner of a relatively-positioned
+   text-field wrapper. */
+.comfy-text-btn--corner {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+  z-index: 2;
+}
+
+/* Wrapper that positions a corner button over a text field. */
+.comfy-textfield-wrap {
+  position: relative;
+  display: block;
+  width: 100%;
+}
+
+.comfy-textfield-wrap > textarea,
+.comfy-textfield-wrap > input {
+  width: 100%;
+  padding-right: 2.2rem;
+}
+
+/* Inline variant for label rows: a bit of separation from adjacent text. */
+.comfy-text-btn--inline {
+  margin-left: 0.4rem;
+  vertical-align: middle;
+}
