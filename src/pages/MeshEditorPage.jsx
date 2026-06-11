@@ -4264,6 +4264,28 @@ export default function MeshEditorPage() {
     composeProjectionFromCache(projectionLayers)
   }, [composeProjectionFromCache, projectionLayers])
 
+  // Fill a layer's mask opaque everywhere → the whole view applies again, but now
+  // the user can erase small parts instead of having to paint the mask over the
+  // entire mesh just to keep a small region clear.
+  const handleFillProjectionLayerMask = useCallback((layerId) => {
+    const canvas = ensureLayerMaskCanvas(layerId)
+    const layerData = projectionLayerDataRef.current.get(layerId)
+    if (!canvas || !layerData) {
+      return
+    }
+    const ctx = canvas.getContext('2d')
+    ctx.globalCompositeOperation = 'source-over'
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+    layerData.maskDirty = true
+    layerData.maskHasPixels = true
+    layerData.maskAlpha = null
+    setProjectionLayers(current => current.map(layer => (
+      layer.id === layerId && !layer.hasMask ? { ...layer, hasMask: true } : layer
+    )))
+    composeProjectionFromCache(projectionLayers)
+  }, [composeProjectionFromCache, ensureLayerMaskCanvas, projectionLayers])
+
   const handleMoveProjectionLayer = useCallback((id, direction) => {
     setProjectionLayers(current => {
       const index = current.findIndex(layer => layer.id === id)
@@ -5660,6 +5682,24 @@ export default function MeshEditorPage() {
                   }}
                 />
               )}
+              {/* Source image ComfyUI returned for the layer being masked — shown in
+                  the bottom-left so the user can reference it while drawing the mask. */}
+              {(() => {
+                if (activeMenu !== 'projection' || !projectionMaskEditLayerId) {
+                  return null
+                }
+                const layerData = projectionLayerDataRef.current.get(projectionMaskEditLayerId)
+                const sourceUrl = layerData?.generatedAsset ? buildAssetUrl(layerData.generatedAsset) : null
+                if (!sourceUrl) {
+                  return null
+                }
+                return (
+                  <div className="mesh-editor-projection-source-preview">
+                    <span className="mesh-editor-projection-source-preview__label">ComfyUI image</span>
+                    <img src={sourceUrl} alt="ComfyUI projection source" />
+                  </div>
+                )
+              })()}
             </div>
 
             {activeMenu === 'painting' && (
@@ -5997,6 +6037,16 @@ export default function MeshEditorPage() {
                                 >
                                   <span className="material-symbols-outlined">{projectionMaskErase ? 'ink_eraser' : 'edit'}</span>
                                   <span>{projectionMaskErase ? 'Erasing' : 'Erase'}</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  className="mesh-editor-btn mesh-editor-btn--ghost"
+                                  onClick={() => handleFillProjectionLayerMask(layer.id)}
+                                  disabled={projectionRebuilding}
+                                  title="Fill the mask over the whole mesh, then erase only the parts you want to remove"
+                                >
+                                  <span className="material-symbols-outlined">format_color_fill</span>
+                                  <span>Fill Mesh</span>
                                 </button>
                                 <button
                                   type="button"
