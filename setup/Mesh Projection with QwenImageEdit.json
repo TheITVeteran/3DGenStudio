@@ -329,7 +329,7 @@
     "inputs": {
       "x": 0,
       "y": 0,
-      "resize_source": false,
+      "resize_source": true,
       "destination": [
         "27",
         0
