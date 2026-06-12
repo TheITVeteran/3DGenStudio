@@ -1,0 +1,216 @@
+.export-mesh-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: rgba(13, 14, 16, 0.82);
+  backdrop-filter: blur(10px);
+}
+
+.export-mesh {
+  width: 100%;
+  max-width: 460px;
+  background: var(--surface-container-low);
+  border: 1px solid rgba(143, 245, 255, 0.08);
+  border-radius: var(--radius-xl);
+  box-shadow: 0 32px 64px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+
+.export-mesh__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  background: rgba(30, 32, 34, 0.78);
+  border-bottom: 1px solid rgba(71, 72, 74, 0.18);
+}
+
+.export-mesh__title {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.export-mesh__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid rgba(71, 72, 74, 0.18);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--on-surface-variant);
+  cursor: pointer;
+  transition: all var(--transition-base);
+}
+
+.export-mesh__close:hover {
+  color: var(--on-surface);
+  border-color: rgba(143, 245, 255, 0.32);
+}
+
+.export-mesh__body {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1.25rem;
+}
+
+.export-mesh__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.export-mesh__label {
+  font-size: 0.74rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--on-surface-variant);
+}
+
+.export-mesh__select,
+.export-mesh__input {
+  height: 40px;
+  padding: 0 0.75rem;
+  border: 1px solid rgba(71, 72, 74, 0.24);
+  border-radius: var(--radius-md);
+  background: rgba(18, 19, 21, 0.88);
+  color: var(--on-surface);
+  font-family: var(--font-body);
+  font-size: 0.84rem;
+}
+
+.export-mesh__select:focus,
+.export-mesh__input:focus {
+  outline: none;
+  border-color: rgba(143, 245, 255, 0.4);
+}
+
+.export-mesh__filename-row,
+.export-mesh__folder-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.export-mesh__filename-row .export-mesh__input,
+.export-mesh__folder-row .export-mesh__input {
+  flex: 1;
+  min-width: 0;
+}
+
+.export-mesh__ext {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.82rem;
+  color: var(--on-surface-variant);
+}
+
+.export-mesh__browse {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  height: 40px;
+  padding: 0 0.85rem;
+  border: 1px solid rgba(71, 72, 74, 0.24);
+  border-radius: var(--radius-md);
+  background: rgba(71, 72, 74, 0.18);
+  color: var(--on-surface);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all var(--transition-base);
+}
+
+.export-mesh__browse:hover {
+  border-color: rgba(143, 245, 255, 0.28);
+  color: var(--primary);
+}
+
+.export-mesh__browse .material-symbols-outlined {
+  font-size: 1.1rem;
+}
+
+.export-mesh__hint {
+  margin: 0;
+  font-size: 0.74rem;
+  line-height: 1.4;
+  color: var(--on-surface-variant);
+}
+
+.export-mesh__message {
+  padding: 0.65rem 0.8rem;
+  border-radius: var(--radius-md);
+  font-size: 0.8rem;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.export-mesh__message--error {
+  background: rgba(255, 120, 120, 0.12);
+  border: 1px solid rgba(255, 120, 120, 0.3);
+  color: #ff9c9c;
+}
+
+.export-mesh__message--success {
+  background: rgba(120, 255, 190, 0.1);
+  border: 1px solid rgba(120, 255, 190, 0.26);
+  color: #9cffce;
+}
+
+.export-mesh__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  padding: 1rem 1.25rem;
+  background: rgba(30, 32, 34, 0.78);
+  border-top: 1px solid rgba(71, 72, 74, 0.18);
+}
+
+.export-mesh__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 110px;
+  padding: 0.7rem 1rem;
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  font-family: var(--font-body);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-base);
+}
+
+.export-mesh__btn--secondary {
+  background: rgba(71, 72, 74, 0.18);
+  border-color: rgba(71, 72, 74, 0.24);
+  color: var(--on-surface);
+}
+
+.export-mesh__btn--secondary:hover {
+  border-color: rgba(143, 245, 255, 0.28);
+  color: var(--primary);
+}
+
+.export-mesh__btn--primary {
+  background: var(--primary);
+  color: var(--on-primary, #06231f);
+}
+
+.export-mesh__btn--primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.export-mesh__btn--primary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}

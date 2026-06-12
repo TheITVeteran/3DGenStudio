@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import Viewer from './Viewer'
+import ExportMeshDialog from './ExportMeshDialog'
 import './MeshPreviewDialog.css'
 
 export default function MeshPreviewDialog({ asset, titleId = 'mesh-preview-dialog-title', onClose }) {
@@ -9,6 +10,7 @@ export default function MeshPreviewDialog({ asset, titleId = 'mesh-preview-dialo
   const [showAlbedo, setShowAlbedo] = useState(false)
   const [showLightSlider, setShowLightSlider] = useState(false)
   const [lightIntensity, setLightIntensity] = useState(2.2)
+  const [showExport, setShowExport] = useState(false)
 
   if (!asset) {
     return null
@@ -97,11 +99,22 @@ export default function MeshPreviewDialog({ asset, titleId = 'mesh-preview-dialo
           </div>
         </div>
         <div className="mesh-preview-dialog__actions">
+          <button type="button" className="mesh-preview-dialog__btn mesh-preview-dialog__btn--secondary" onClick={() => setShowExport(true)}>
+            Export
+          </button>
           <button type="button" className="mesh-preview-dialog__btn mesh-preview-dialog__btn--secondary" onClick={onClose}>
             Close
           </button>
         </div>
       </div>
+
+      {showExport && (
+        <ExportMeshDialog
+          meshUrl={asset.url}
+          defaultName={asset.name || 'mesh'}
+          onClose={() => setShowExport(false)}
+        />
+      )}
     </div>
   )
 }

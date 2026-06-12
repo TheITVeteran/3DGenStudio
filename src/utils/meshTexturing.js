@@ -724,9 +724,12 @@ function exportObjectToGlb(object) {
   })
 }
 
-export async function exportTexturedMeshToGlb({ root, textureKey, textureCanvas, textureConfig = null }) {
+// Build a cloned, fully-textured THREE.Object3D ready to feed to any exporter.
+// Returns the object plus the transient materials/texture it created so the
+// caller can dispose them once the export has been serialized.
+export function buildTexturedMeshObject({ root, textureKey, textureCanvas, textureConfig = null }) {
   if (!root || !textureCanvas) {
-    throw new Error('A textured mesh is required to export a textured GLB file.')
+    throw new Error('A textured mesh is required to build a textured export object.')
   }
 
   const object = root.clone(true)
@@ -770,6 +773,12 @@ export async function exportTexturedMeshToGlb({ root, textureKey, textureCanvas,
       materials.push(nextMaterial)
     }
   })
+
+  return { object, materials, exportTexture }
+}
+
+export async function exportTexturedMeshToGlb(args) {
+  const { object, materials, exportTexture } = buildTexturedMeshObject(args)
 
   try {
     return await exportObjectToGlb(object)

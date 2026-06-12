@@ -9,6 +9,7 @@ import fs from 'fs/promises';
 import { createWriteStream, existsSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import process from 'node:process';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import si from 'systeminformation';
 import tencentcloudSdk from 'tencentcloud-sdk-nodejs-intl-en';
@@ -4770,6 +4771,134 @@ app.post('/api/meshes/editor/save', meshEditorSaveUpload.single('meshFile'), asy
   } catch (err) {
     console.error('Failed to save mesh editor result:', err);
     res.status(500).json({ error: err.message || 'Failed to save mesh editor result' });
+  }
+});
+
+// Enumerate available Windows drive roots (C:\, D:\, ...) by probing letters.
+async function listWindowsDriveRoots() {
+  const drives = [];
+  for (let code = 65; code <= 90; code += 1) {
+    const root = `${String.fromCharCode(code)}:\\`;
+    try {
+      await fs.access(root);
+      drives.push(root);
+    } catch {
+      // Drive letter not mounted; skip it.
+    }
+  }
+  return drives;
+}
+
+function isWindowsDriveRoot(targetPath) {
+  return /^[A-Za-z]:[\\/]?$/.test(targetPath);
+}
+
+// Browse directories on the host so the export dialog can pick an output
+// folder. With no `path`, returns the drive list on Windows (or `/` elsewhere).
+app.get('/api/filesystem/folders', async (req, res) => {
+  try {
+    const requestedPath = typeof req.query.path === 'string' ? req.query.path.trim() : '';
+    const isWindows = process.platform === 'win32';
+    const home = os.homedir();
+    const drives = isWindows ? await listWindowsDriveRoots() : [];
+
+    // Empty path on Windows => show the list of drives as the top level.
+    if (!requestedPath && isWindows) {
+      return res.json({
+        path: '',
+        parent: null,
+        separator: path.sep,
+        home,
+        drives,
+        entries: drives.map(drive => ({ name: drive, path: drive, isDirectory: true }))
+      });
+    }
+
+    const resolvedPath = path.resolve(requestedPath || (isWindows ? home : '/'));
+    const stats = await fs.stat(resolvedPath);
+    if (!stats.isDirectory()) {
+      return res.status(400).json({ error: 'The selected path is not a folder.' });
+    }
+
+    const dirEntries = await fs.readdir(resolvedPath, { withFileTypes: true });
+    const entries = dirEntries
+      .filter(entry => {
+        try {
+          return entry.isDirectory();
+        } catch {
+          return false;
+        }
+      })
+      .map(entry => ({
+        name: entry.name,
+        path: path.join(resolvedPath, entry.name),
+        isDirectory: true
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+
+    // Up from a drive root returns to the drive list on Windows; otherwise the
+    // parent directory, or null when already at the filesystem root.
+    let parent = path.dirname(resolvedPath);
+    if (isWindows && isWindowsDriveRoot(resolvedPath)) {
+      parent = '';
+    } else if (parent === resolvedPath) {
+      parent = null;
+    }
+
+    res.json({
+      path: resolvedPath,
+      parent,
+      separator: path.sep,
+      home,
+      drives,
+      entries
+    });
+  } catch (err) {
+    console.error('Failed to browse folders:', err);
+    const message = err.code === 'EACCES'
+      ? 'Access to this folder is denied.'
+      : err.code === 'ENOENT'
+        ? 'That folder does not exist.'
+        : (err.message || 'Failed to browse folders');
+    res.status(400).json({ error: message });
+  }
+});
+
+// Write exported mesh files (mesh + companions) into a user-chosen folder.
+app.post('/api/export/mesh', multer({ storage: multer.memoryStorage(), limits: { fileSize: 512 * 1024 * 1024 } }).array('files'), async (req, res) => {
+  try {
+    const folder = typeof req.body?.folder === 'string' ? req.body.folder.trim() : '';
+    const files = Array.isArray(req.files) ? req.files : [];
+
+    if (!folder) {
+      return res.status(400).json({ error: 'An output folder is required.' });
+    }
+    if (files.length === 0) {
+      return res.status(400).json({ error: 'No files were provided to export.' });
+    }
+    if (!path.isAbsolute(folder)) {
+      return res.status(400).json({ error: 'The output folder must be an absolute path.' });
+    }
+
+    const resolvedFolder = path.resolve(folder);
+    await fs.mkdir(resolvedFolder, { recursive: true });
+
+    const written = [];
+    for (const file of files) {
+      // Use only the base name to prevent writing outside the chosen folder.
+      const safeName = path.basename(file.originalname || 'mesh.bin');
+      const destination = path.join(resolvedFolder, safeName);
+      await fs.writeFile(destination, file.buffer);
+      written.push(safeName);
+    }
+
+    res.status(201).json({ folder: resolvedFolder, written });
+  } catch (err) {
+    console.error('Failed to export mesh files:', err);
+    const message = err.code === 'EACCES'
+      ? 'Access to the output folder is denied.'
+      : (err.message || 'Failed to export mesh files');
+    res.status(500).json({ error: message });
   }
 });
 

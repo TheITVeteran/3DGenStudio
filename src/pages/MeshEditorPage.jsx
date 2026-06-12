@@ -36,6 +36,7 @@ import {
   cropCanvas,
   drawCanvasStroke,
   drawUvStroke,
+  buildTexturedMeshObject,
   exportTexturedMeshToGlb,
   getMaskBoundingBox,
   getTextureKeyFromMaterial,
@@ -82,6 +83,7 @@ import {
 import './MeshEditorPage.css'
 import AssetSelectorModal from '../components/AssetSelectorModal';
 import SculptToolsPanel from '../components/SculptToolsPanel';
+import ExportMeshDialog from '../components/ExportMeshDialog';
 
 const AUTO_PROJECTION_SEAM_SAFE_CROP_PX = 0
 const AUTO_PROJECTION_SEAM_SAFE_BLEND_PX = 0
@@ -327,6 +329,7 @@ export default function MeshEditorPage() {
   const booleanLastHoverUpdateRef = useRef(0)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [showExport, setShowExport] = useState(false)
   const [texturing, setTexturing] = useState(false)
   const [error, setError] = useState('')
   const [feedback, setFeedback] = useState('')
@@ -3654,6 +3657,36 @@ export default function MeshEditorPage() {
     setBooleanPlaceMode(false)
   }, [])
 
+  // Build the in-memory THREE.Object3D for the export dialog. Mirrors the save
+  // logic: prefer the fully textured mesh, otherwise the edited geometry with a
+  // neutral material.
+  const getExportObject = useCallback(() => {
+    if (!geometry) {
+      throw new Error('No mesh is available to export.')
+    }
+
+    const canExportTextured = !!(
+      texturableMesh?.root
+      && texturableMesh?.textureCanvas
+      && geometry?.attributes?.uv?.count
+    )
+
+    if (canExportTextured) {
+      const { object } = buildTexturedMeshObject({
+        root: texturableMesh.root,
+        textureKey: texturableMesh.textureKey,
+        textureCanvas: texturableMesh.textureCanvas,
+        textureConfig: texturableMesh.textureConfig
+      })
+      return object
+    }
+
+    return new THREE.Mesh(
+      geometry.clone(),
+      new THREE.MeshStandardMaterial({ color: '#cfd8ff', metalness: 0.08, roughness: 0.62 })
+    )
+  }, [geometry, texturableMesh])
+
   const handleSave = useCallback(async (saveMode) => {
     if (!geometry || saving) {
       return
@@ -5262,6 +5295,7 @@ export default function MeshEditorPage() {
               <div className="mesh-editor-actions mesh-editor-toolbar__save-actions">
                 <button type="button" className="mesh-editor-btn mesh-editor-btn--primary" onClick={() => handleSave('replace')} disabled={saving || !geometry}>Save mesh</button>
                 <button type="button" className="mesh-editor-btn mesh-editor-btn--secondary" onClick={() => handleSave('version')} disabled={saving || !geometry}>Save as version</button>
+                <button type="button" className="mesh-editor-btn mesh-editor-btn--secondary" onClick={() => setShowExport(true)} disabled={!geometry}>Export</button>
                 <button
                   type="button"
                   className={`mesh-editor-btn ${showShadows ? 'mesh-editor-btn--secondary' : 'mesh-editor-btn--ghost'}`}
@@ -6218,6 +6252,13 @@ export default function MeshEditorPage() {
             setPendingAssetSelectorMode('texturing')
           }}
           showEdits
+        />
+      )}
+      {showExport && (
+        <ExportMeshDialog
+          getObject3D={getExportObject}
+          defaultName={meshName || 'mesh'}
+          onClose={() => setShowExport(false)}
         />
       )}
       <Footer />
