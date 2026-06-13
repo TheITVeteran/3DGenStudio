@@ -4,7 +4,8 @@
 		"VAE": "models/vae",
 		"TextEncoder": "models/text_encoders",
 		"LoRA": "models/loras",
-		"ControlNet": "models/controlnet"
+		"ControlNet": "models/controlnet",
+		"UpscaleModels": "models/upscale_models"
 	},
 	"DiffusionModels": [
 		{
@@ -26,6 +27,9 @@
 				{ "FileName": "QIE-2511-Studio-DeLight-5000.safetensors", "Url": "https://huggingface.co/prithivMLmods/QIE-2511-Studio-DeLight/resolve/main/QIE-2511-Studio-DeLight-5000.safetensors?download=true",        "Size": 0.2 },
 				{ "FileName": "%E7%A7%BB%E9%99%A4%E5%85%89%E5%BD%B1V2.safetensors", "Url": "https://huggingface.co/dx8152/Qwen-Image-Edit-2509-Light_restoration/resolve/main/%E7%A7%BB%E9%99%A4%E5%85%89%E5%BD%B1V2.safetensors?download=true",        "Size": 0.2 }
 			],
+			"UpscaleModels": [
+				{ "FileName": "4x-UltraSharpV2.pth", "Url": "https://huggingface.co/Kim2091/UltraSharpV2/resolve/main/4x-UltraSharpV2.pth?download=true", "Size": 0.1 }
+			],			
 			"Workflows": [
 				{
 					"Name": "Mesh Projection with QwenImageEdit",
@@ -98,7 +102,40 @@
 					"Outputs": [
 						{ "Node": "155", "Name": "Save Image", "Type": "Image" }
 					]
-				}					
+				},
+				{
+					"Name": "Mesh Projection with QwenImageEdit - Upscaled",
+					"File": "setup/Mesh Projection with QwenImageEdit - Upscaled.json",
+					"Inputs": [
+						{ "Node": "21", "Input": "image",  "Name": "Position Image",    "Type": "Image"  },
+						{ "Node": "22", "Input": "image",  "Name": "Reference Image",   "Type": "Image"  },
+						{ "Node": "8",  "Input": "prompt", "Name": "Prompt",            "Type": "String" },
+						{ "Node": "20", "Input": "seed",   "Name": "Seed",              "Type": "Number" },
+						{ "Node": "34", "Input": "value",  "Name": "Image Resolution",  "Type": "Number" },
+						{ "Node": "36", "Input": "mask_offset",  "Name": "RMBG - Mask Offset",  "Type": "Number" },
+						{ "Node": "36", "Input": "mask_blur",  "Name": "RMBG - Mask Blur",  "Type": "Number" }
+					],
+					"Outputs": [
+						{ "Node": "35", "Name": "Save Image", "Type": "Image" }
+					]
+				},
+				{
+					"Name": "Mesh Projection TexturedView with QwenImageEdit - Upscaled",
+					"File": "setup/Mesh Projection TexturedView with QwenImageEdit - Upscaled.json",
+					"Inputs": [
+						{ "Node": "21", "Input": "image",  "Name": "Position Image",    "Type": "Image"  },
+						{ "Node": "22", "Input": "image",  "Name": "Reference Image",   "Type": "Image"  },
+						{ "Node": "37", "Input": "image",  "Name": "Textured View",     "Type": "Image"  },
+						{ "Node": "8",  "Input": "prompt", "Name": "Prompt",            "Type": "String" },
+						{ "Node": "20", "Input": "seed",   "Name": "Seed",              "Type": "Number" },
+						{ "Node": "34", "Input": "value",  "Name": "Image Resolution",  "Type": "Number" },
+						{ "Node": "36", "Input": "mask_offset",  "Name": "RMBG - Mask Offset",  "Type": "Number" },
+						{ "Node": "36", "Input": "mask_blur",  "Name": "RMBG - Mask Blur",  "Type": "Number" }						
+					],
+					"Outputs": [
+						{ "Node": "35", "Name": "Save Image", "Type": "Image" }
+					]
+				}				
 			]
 		},
 		{
@@ -152,6 +189,9 @@
 			],
 			"LoRA":[        				
 				{ "FileName": "Flux_2-Turbo-LoRA_comfyui.safetensors", "Url": "https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/loras/Flux_2-Turbo-LoRA_comfyui.safetensors?download=true", "Size": 2.8 }
+			],
+			"UpscaleModels": [
+				{ "FileName": "4x-UltraSharpV2.pth", "Url": "https://huggingface.co/Kim2091/UltraSharpV2/resolve/main/4x-UltraSharpV2.pth?download=true", "Size": 0.1 }
 			],			
 			"Workflows": [
 				{
@@ -169,6 +209,22 @@
 				{
 					"Name": "Mesh Projection with Flux2Dev",
 					"File": "setup/Mesh Projection with Flux2Dev.json",
+					"Inputs": [
+						{ "Node": "42", "Input": "image",  "Name": "Position Image",    "Type": "Image"  },
+						{ "Node": "46", "Input": "image",  "Name": "Reference Image",   "Type": "Image"  },
+						{ "Node": "6",  "Input": "text", "Name": "Prompt",            "Type": "String" },
+						{ "Node": "25", "Input": "noise_seed",   "Name": "Seed",              "Type": "Number" },
+						{ "Node": "76", "Input": "value",  "Name": "Image Resolution",  "Type": "Number" },
+						{ "Node": "75", "Input": "mask_offset",  "Name": "RMBG - Mask Offset",  "Type": "Number" },
+						{ "Node": "75", "Input": "mask_blur",  "Name": "RMBG - Mask Blur",  "Type": "Number" }
+					],
+					"Outputs": [
+						{ "Node": "9", "Name": "Save Image", "Type": "Image" }
+					]
+				},
+				{
+					"Name": "Mesh Projection with Flux2Dev - Upscaled",
+					"File": "setup/Mesh Projection with Flux2Dev - Upscaled.json",
 					"Inputs": [
 						{ "Node": "42", "Input": "image",  "Name": "Position Image",    "Type": "Image"  },
 						{ "Node": "46", "Input": "image",  "Name": "Reference Image",   "Type": "Image"  },
@@ -228,9 +284,12 @@
 			"VAE":         { "FileName": "flux2-vae.safetensors",                        "Url": "https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/vae/flux2-vae.safetensors?download=true",                                     "Size": 0.3  },
 			"TextEncoder": { "FileName": "qwen_3_8b_fp8mixed.safetensors", "Url": "https://huggingface.co/Comfy-Org/vae-text-encorder-for-flux-klein-9b/resolve/main/split_files/text_encoders/qwen_3_8b_fp8mixed.safetensors?download=true",          "Size": 5.6 },
 			"LoRA":[        				
-				{ "FileName": "flux2-klein9b-canny5k-lora_000000500.safetensors", "Url": "https://huggingface.co/visualbruno/Flux2KleinLora/resolve/main/flux2-klein9b-canny5k-lora_000000500.safetensors?download=true", "Size": 331.0 },
-				{ "FileName": "flux2-klein9b-albedo-lora.safetensors", "Url": "https://huggingface.co/visualbruno/Flux2KleinLora/resolve/main/flux2-klein9b-albedo-lora.safetensors?download=true", "Size": 331.0 }
-			],			
+				{ "FileName": "flux2-klein9b-canny5k-lora_000000500.safetensors", "Url": "https://huggingface.co/visualbruno/Flux2KleinLora/resolve/main/flux2-klein9b-canny5k-lora_000000500.safetensors?download=true", "Size": 0.3 },
+				{ "FileName": "flux2-klein9b-albedo-lora.safetensors", "Url": "https://huggingface.co/visualbruno/Flux2KleinLora/resolve/main/flux2-klein9b-albedo-lora.safetensors?download=true", "Size": 0.3 }
+			],
+			"UpscaleModels": [
+				{ "FileName": "4x-UltraSharpV2.pth", "Url": "https://huggingface.co/Kim2091/UltraSharpV2/resolve/main/4x-UltraSharpV2.pth?download=true", "Size": 0.1 }
+			],
 			"Workflows": [
 				{
 					"Name": "Gen Image with Flux2Klein9B",
@@ -284,7 +343,22 @@
 					"Outputs": [
 						{ "Node": "70", "Name": "Save Image", "Type": "Image" }
 					]
-				}				
+				},
+				{
+					"Name": "Mesh Projection with Flux2Klein9B - Upscaled",
+					"File": "setup/Mesh Projection with Flux2Klein9B - Upscaled.json",
+					"Inputs": [
+						{ "Node": "1", "Input": "image",  "Name": "Position Image",    "Type": "Image"  },
+						{ "Node": "6",  "Input": "text", "Name": "Prompt",            "Type": "String" },
+						{ "Node": "7", "Input": "noise_seed",   "Name": "Seed",              "Type": "Number" },
+						{ "Node": "66", "Input": "value",  "Name": "Image Resolution",  "Type": "Number" },
+						{ "Node": "67", "Input": "mask_offset",  "Name": "RMBG - Mask Offset",  "Type": "Number" },
+						{ "Node": "67", "Input": "mask_blur",  "Name": "RMBG - Mask Blur",  "Type": "Number" }
+					],
+					"Outputs": [
+						{ "Node": "64", "Name": "Save Image", "Type": "Image" }
+					]
+				}
 			]
 		}		
 	],

@@ -56,6 +56,12 @@ function buildFileList(config, selections, comfyPathsByCategory) {
     for (const controlnetEntry of controlnets) {
       addFile(comfyPathsByCategory.ControlNet, controlnetEntry)
     }
+    const upscaleModels = Array.isArray(diffusion.UpscaleModels)
+      ? diffusion.UpscaleModels
+      : (diffusion.UpscaleModels ? [diffusion.UpscaleModels] : [])
+    for (const upscaleEntry of upscaleModels) {
+      addFile(comfyPathsByCategory.UpscaleModels, upscaleEntry)
+    }
   }
 
   return Array.from(map.values())
