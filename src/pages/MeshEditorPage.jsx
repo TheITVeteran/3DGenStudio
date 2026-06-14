@@ -4630,9 +4630,50 @@ export default function MeshEditorPage() {
           }
         }
 
+        // Erode a 0/255 alpha mask inward by `radius` pixels (separable min
+        // filter). A texel survives only if every texel within the radius is
+        // also set, so the boundary band shrinks uniformly.
+        const erodeBinaryAlpha = (src, w, h, radius) => {
+          if (radius <= 0) return src
+          const tmp = new Uint8Array(src.length)
+          for (let y = 0; y < h; y += 1) {
+            const row = y * w
+            for (let x = 0; x < w; x += 1) {
+              const x0 = x - radius < 0 ? 0 : x - radius
+              const x1 = x + radius >= w ? w - 1 : x + radius
+              let keep = 255
+              for (let xx = x0; xx <= x1; xx += 1) {
+                if (src[row + xx] === 0) { keep = 0; break }
+              }
+              tmp[row + x] = keep
+            }
+          }
+          const out = new Uint8Array(src.length)
+          for (let x = 0; x < w; x += 1) {
+            for (let y = 0; y < h; y += 1) {
+              const y0 = y - radius < 0 ? 0 : y - radius
+              const y1 = y + radius >= h ? h - 1 : y + radius
+              let keep = 255
+              for (let yy = y0; yy <= y1; yy += 1) {
+                if (tmp[yy * w + x] === 0) { keep = 0; break }
+              }
+              out[y * w + x] = keep
+            }
+          }
+          return out
+        }
+
+        // The covered/uncovered seams and the mesh silhouette carry a thin white
+        // fringe in the textured render — the render's edge anti-aliasing plus
+        // the light, still-untextured base texels exposed right at the boundary.
+        // The screen-space coverage mask keeps a slightly oversized region, so
+        // that fringe survives a plain threshold. Trim it by eroding the alpha
+        // inward a few pixels; ComfyUI re-inpaints the shaved border anyway.
+        const seamFringeErodePx = Math.max(2, Math.round(sendResolution / 340))
+
         // Threshold the mask render's brightness against the dark scene background
         // (#0b0d12 ≈ 11) so off-mesh and the inverse-classified surface both
-        // become fully transparent.
+        // become fully transparent, then erode to drop the white seam fringe.
         const composeMaskedView = (maskRenderCanvas) => {
           const composedCanvas = document.createElement('canvas')
           composedCanvas.width = sendResolution
@@ -4641,8 +4682,16 @@ export default function MeshEditorPage() {
           composedCtx.drawImage(texturedViewCanvas, 0, 0)
           const composed = composedCtx.getImageData(0, 0, sendResolution, sendResolution)
           const maskPixels = maskRenderCanvas.getContext('2d').getImageData(0, 0, sendResolution, sendResolution).data
-          for (let i = 0; i < composed.data.length; i += 4) {
-            composed.data[i + 3] = maskPixels[i] > 64 ? 255 : 0
+          const pixelCount = sendResolution * sendResolution
+          // Start from a tight threshold so the anti-aliased mask edge is already
+          // excluded before erosion shrinks the band further.
+          const alpha = new Uint8Array(pixelCount)
+          for (let p = 0; p < pixelCount; p += 1) {
+            alpha[p] = maskPixels[p * 4] > 96 ? 255 : 0
+          }
+          const eroded = erodeBinaryAlpha(alpha, sendResolution, sendResolution, seamFringeErodePx)
+          for (let p = 0; p < pixelCount; p += 1) {
+            composed.data[p * 4 + 3] = eroded[p]
           }
           composedCtx.putImageData(composed, 0, 0)
           return composedCanvas
