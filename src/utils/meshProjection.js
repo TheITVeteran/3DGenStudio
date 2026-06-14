@@ -659,12 +659,18 @@ export function resolveProjectionLayersIntoImageData(outputData, layerSnapshots,
     const gainB = gain ? gain[2] : 1
 
     const blendPx = Math.max(0, Number(layer.blendPixels) || 0)
-    // Distance INSIDE the currently-owned region (0 at its border, growing inward).
-    // Only needed once there is prior coverage and a seam blend is requested.
+    // Distance (in pixels) INWARD through the owned region from the genuine INTER-VIEW
+    // SEAM — the boundary where the committed (earlier-view) region ends and THIS
+    // layer's coverage continues. computeProjectionViewBorderDistance seeds exactly at
+    // committed texels whose non-committed neighbour is covered by this layer, so the
+    // feather follows view-ownership boundaries ONLY. A plain distance-from-committed
+    // -border transform (the previous approach) also fired on UV-chart edges and
+    // coverage holes, so the blend smeared around UV seams (patchy white blotches)
+    // instead of the view seam. Returns -1 for texels farther than blendPx from a seam
+    // and for non-committed texels → those stay locked.
     const ownedDist = (layerIndex > 0 && blendPx > 0 && seamMax > 0)
-      ? computeProjectionDistanceInsideMask(committed, width, height)
+      ? computeProjectionViewBorderDistance(committed, layer.coverageMask, width, height, blendPx)
       : null
-    const denom = Math.max(1, blendPx * 10) // ORTHO step cost in the distance transform
 
     // Distance from this layer's true VIEW border (silhouette/occlusion edge),
     // inward through its coverage — 0 at the border, growing inward, -1 in the
@@ -702,19 +708,31 @@ export function resolveProjectionLayersIntoImageData(outputData, layerSnapshots,
           // only data here, so no base/checker bleed and nothing is left untextured.
           influence = opacity
         }
-      } else if (ownedDist) {
-        // Owned by an earlier layer → keep the interior untouched; only blend within
-        // blendPixels of the owned border, scaled by how well THIS view sees it.
-        const dEdge = ownedDist[i]
-        const t = clamp01(1 - dEdge / denom) // 1 at the owned border → 0 blendPx inside
+      } else if (ownedDist && ownedDist[i] >= 0) {
+        // Owned by an earlier layer AND within blendPixels of a genuine inter-view seam
+        // → cross-fade. Interior texels (dist -1) stay locked, so the blend never
+        // touches UV-chart edges or coverage holes — only the view-ownership boundary.
+        const dEdge = ownedDist[i] // pixels from the seam (0 at the seam, growing inward)
+        const t = clamp01(1 - dEdge / Math.max(1, blendPx)) // 1 at the seam → 0 blendPx inside
         const conf = layer.confidenceMap?.[i] || 0
-        const smoothConf = conf * conf * (3 - 2 * conf)
+        // The stored confidence is a STEEP cosine (≈ facing^6 from the GPU bake): it
+        // collapses even moderate overlap angles to ~0 and only stays high in a narrow
+        // head-on cone. Gating the blend directly on it therefore kills ALL seam
+        // cross-fading (a later view's genuine moderate-angle overlap band scores ~0).
+        // Remap it back toward raw facing (pow ≈ 1/alpha) so the real overlap band — where
+        // both views see the surface acceptably — blends, while only the extreme-grazing
+        // silhouette band (near-zero facing → washed background colour) stays suppressed.
+        const blendConf = Math.pow(clamp01(conf), 0.2)
+        const smoothConf = blendConf * blendConf * (3 - 2 * blendConf)
 
-        // Continuous transition of the confidence penalty from 1.0 (at the boundary where dEdge -> 0)
-        // to smoothConf * seamMax (further inside). This removes the severe discontinuity drop
-        // at the boundary with unowned territory, preventing visible seam lines.
+        // Cross-fade this view into the owned region, CAPPED by how well THIS view sees
+        // the texel (smoothConf). Ramp from smoothConf*seamMax (blendPx inside the owned
+        // border) up to smoothConf at the boundary — so a view that sees the seam well
+        // hands over smoothly (≈opacity at the border, continuous with its own first-cover
+        // region just across the seam), while a view that sees it only grazingly barely
+        // contributes (no washed-out silhouette colour bleeding across the seam).
         const finalSeamLimit = smoothConf * seamMax
-        const scaledConf = finalSeamLimit + (1 - finalSeamLimit) * t
+        const scaledConf = finalSeamLimit + (smoothConf - finalSeamLimit) * t
 
         influence = (t * t * (3 - 2 * t)) * scaledConf * opacity
       } else {
