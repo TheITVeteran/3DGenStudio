@@ -1,0 +1,1061 @@
+{
+  "89": {
+    "inputs": {
+      "texture_size": [
+        "1783",
+        0
+      ],
+      "blend_texture": true,
+      "blend_exponent": 2,
+      "ortho_scale": 1.2,
+      "norm_size": 1.15,
+      "fill_holes": true,
+      "max_hole_size": 20,
+      "use_metallic": false,
+      "depth_eps": 0.01,
+      "mesh_cluster_threshold_cone_half_angle_rad": 60,
+      "add_alpha_channel": false,
+      "front_weight": 1,
+      "back_weight": 1,
+      "left_weight": 1,
+      "right_weight": 1,
+      "top_weight": 1,
+      "bottom_weight": 1,
+      "custom_azimuths": [
+        "1800",
+        0
+      ],
+      "custom_elevations": [
+        "1801",
+        0
+      ],
+      "custom_weights": [
+        "1802",
+        0
+      ],
+      "trimesh": [
+        "1805:468",
+        0
+      ],
+      "custom_images": [
+        "1803",
+        0
+      ]
+    },
+    "class_type": "Trellis2MultiViewTexturing",
+    "_meta": {
+      "title": "Trellis2 - Projection MultiView Texturing"
+    }
+  },
+  "90": {
+    "inputs": {
+      "model": "RMBG-2.0",
+      "sensitivity": 1,
+      "process_res": 1024,
+      "mask_blur": 0,
+      "mask_offset": 0,
+      "invert_output": false,
+      "refine_foreground": false,
+      "background": "Alpha",
+      "background_color": "#222222",
+      "image": [
+        "101:8",
+        0
+      ]
+    },
+    "class_type": "RMBG",
+    "_meta": {
+      "title": "Remove Background (RMBG)"
+    }
+  },
+  "91": {
+    "inputs": {
+      "value": "0,90,180,270,0,0,135"
+    },
+    "class_type": "PrimitiveString",
+    "_meta": {
+      "title": "Azimuths1"
+    }
+  },
+  "92": {
+    "inputs": {
+      "value": "0,0,0,0,90,-90,-20"
+    },
+    "class_type": "PrimitiveString",
+    "_meta": {
+      "title": "Elevations1"
+    }
+  },
+  "93": {
+    "inputs": {
+      "value": "1,0.5,1,0.5,0.5,0.5,0.5"
+    },
+    "class_type": "PrimitiveString",
+    "_meta": {
+      "title": "Weights1"
+    }
+  },
+  "94": {
+    "inputs": {
+      "filename_prefix": [
+        "1785",
+        0
+      ],
+      "images": [
+        "90",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  },
+  "95": {
+    "inputs": {
+      "filename_prefix": [
+        "1784",
+        0
+      ],
+      "file_format": "glb",
+      "trimesh": [
+        "89",
+        0
+      ]
+    },
+    "class_type": "Trellis2ExportMesh",
+    "_meta": {
+      "title": "Trellis2 - Export Mesh"
+    }
+  },
+  "96": {
+    "inputs": {
+      "model_file": [
+        "95",
+        0
+      ],
+      "image": ""
+    },
+    "class_type": "Preview3D",
+    "_meta": {
+      "title": "Preview 3D & Animation"
+    }
+  },
+  "1775": {
+    "inputs": {
+      "image": "Entrance01.png"
+    },
+    "class_type": "Trellis2LoadImageWithTransparency",
+    "_meta": {
+      "title": "Trellis2 - Load Image with Transparency"
+    }
+  },
+  "1777": {
+    "inputs": {
+      "value": "Entrance01_XViews_Hy20"
+    },
+    "class_type": "PrimitiveString",
+    "_meta": {
+      "title": "Name"
+    }
+  },
+  "1778": {
+    "inputs": {
+      "string_a": "3D/",
+      "string_b": [
+        "1777",
+        0
+      ],
+      "delimiter": ""
+    },
+    "class_type": "StringConcatenate",
+    "_meta": {
+      "title": "Concatenate Text"
+    }
+  },
+  "1779": {
+    "inputs": {
+      "string_a": [
+        "1778",
+        0
+      ],
+      "string_b": [
+        "1777",
+        0
+      ],
+      "delimiter": "/"
+    },
+    "class_type": "StringConcatenate",
+    "_meta": {
+      "title": "Concatenate Text"
+    }
+  },
+  "1781": {
+    "inputs": {
+      "value": 500000
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Target Face Number"
+    }
+  },
+  "1782": {
+    "inputs": {
+      "value": 12345
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Seed"
+    }
+  },
+  "1783": {
+    "inputs": {
+      "value": 2048
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Texture Size"
+    }
+  },
+  "1784": {
+    "inputs": {
+      "string_a": [
+        "1779",
+        0
+      ],
+      "string_b": "_TexturedMesh_MV",
+      "delimiter": ""
+    },
+    "class_type": "StringConcatenate",
+    "_meta": {
+      "title": "Concatenate Text"
+    }
+  },
+  "1785": {
+    "inputs": {
+      "string_a": [
+        "1779",
+        0
+      ],
+      "string_b": "_NoBG",
+      "delimiter": ""
+    },
+    "class_type": "StringConcatenate",
+    "_meta": {
+      "title": "Concatenate Text"
+    }
+  },
+  "1793": {
+    "inputs": {
+      "model": "RMBG-2.0",
+      "sensitivity": 1,
+      "process_res": 1024,
+      "mask_blur": 0,
+      "mask_offset": 0,
+      "invert_output": false,
+      "refine_foreground": false,
+      "background": "Alpha",
+      "background_color": "#222222",
+      "image": [
+        "1792:1790",
+        0
+      ]
+    },
+    "class_type": "RMBG",
+    "_meta": {
+      "title": "Remove Background (RMBG)"
+    }
+  },
+  "1794": {
+    "inputs": {
+      "string_a": [
+        "1779",
+        0
+      ],
+      "string_b": "_NoBG",
+      "delimiter": ""
+    },
+    "class_type": "StringConcatenate",
+    "_meta": {
+      "title": "Concatenate Text"
+    }
+  },
+  "1795": {
+    "inputs": {
+      "filename_prefix": [
+        "1794",
+        0
+      ],
+      "images": [
+        "1793",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  },
+  "1796": {
+    "inputs": {
+      "value": "45,315,45,315,135,225,225"
+    },
+    "class_type": "PrimitiveString",
+    "_meta": {
+      "title": "Azimuths2"
+    }
+  },
+  "1797": {
+    "inputs": {
+      "value": "-20,-20,20,20,20,20,-20"
+    },
+    "class_type": "PrimitiveString",
+    "_meta": {
+      "title": "Elevations2"
+    }
+  },
+  "1798": {
+    "inputs": {
+      "value": "0.5,0.5,0.5,0.5,0.5,0.5,0.5"
+    },
+    "class_type": "PrimitiveString",
+    "_meta": {
+      "title": "Weights2"
+    }
+  },
+  "1799": {
+    "inputs": {
+      "input_1": [
+        "90",
+        0
+      ],
+      "input_2": [
+        "1805:468",
+        0
+      ]
+    },
+    "class_type": "Trellis2Continue",
+    "_meta": {
+      "title": "Trellis2 - Continue"
+    }
+  },
+  "1800": {
+    "inputs": {
+      "string_a": [
+        "91",
+        0
+      ],
+      "string_b": [
+        "1796",
+        0
+      ],
+      "delimiter": ","
+    },
+    "class_type": "StringConcatenate",
+    "_meta": {
+      "title": "Azimuths"
+    }
+  },
+  "1801": {
+    "inputs": {
+      "string_a": [
+        "92",
+        0
+      ],
+      "string_b": [
+        "1797",
+        0
+      ],
+      "delimiter": ","
+    },
+    "class_type": "StringConcatenate",
+    "_meta": {
+      "title": "Elevations"
+    }
+  },
+  "1802": {
+    "inputs": {
+      "string_a": [
+        "93",
+        0
+      ],
+      "string_b": [
+        "1798",
+        0
+      ],
+      "delimiter": ","
+    },
+    "class_type": "StringConcatenate",
+    "_meta": {
+      "title": "Weights"
+    }
+  },
+  "1803": {
+    "inputs": {
+      "images.image0": [
+        "90",
+        0
+      ],
+      "images.image1": [
+        "1793",
+        0
+      ]
+    },
+    "class_type": "BatchImagesNode",
+    "_meta": {
+      "title": "Batch Images"
+    }
+  },
+  "1808": {
+    "inputs": {
+      "filename_prefix": [
+        "1779",
+        0
+      ],
+      "subfolder_dir": "",
+      "filename": "_camera_config",
+      "text": [
+        "1810",
+        0
+      ]
+    },
+    "class_type": "SaveTextCustomNode",
+    "_meta": {
+      "title": "Save Text Custom Node"
+    }
+  },
+  "1809": {
+    "inputs": {
+      "string_a": [
+        "1800",
+        0
+      ],
+      "string_b": [
+        "1801",
+        0
+      ],
+      "delimiter": "#"
+    },
+    "class_type": "StringConcatenate",
+    "_meta": {
+      "title": "All Texts"
+    }
+  },
+  "1810": {
+    "inputs": {
+      "string_a": [
+        "1809",
+        0
+      ],
+      "string_b": [
+        "1802",
+        0
+      ],
+      "delimiter": "#"
+    },
+    "class_type": "StringConcatenate",
+    "_meta": {
+      "title": "All Texts"
+    }
+  },
+  "1805:408": {
+    "inputs": {
+      "trimesh": [
+        "1805:1688",
+        0
+      ]
+    },
+    "class_type": "Trellis2SmoothNormals",
+    "_meta": {
+      "title": "Trellis2 - Smooth Normals"
+    }
+  },
+  "1805:468": {
+    "inputs": {
+      "input_1": [
+        "1805:408",
+        0
+      ],
+      "input_2": [
+        "1805:409",
+        0
+      ]
+    },
+    "class_type": "Trellis2Continue",
+    "_meta": {
+      "title": "Trellis2 - Continue"
+    }
+  },
+  "1805:409": {
+    "inputs": {
+      "filename_prefix": [
+        "1805:414",
+        0
+      ],
+      "file_format": "glb",
+      "trimesh": [
+        "1805:408",
+        0
+      ]
+    },
+    "class_type": "Trellis2ExportMesh",
+    "_meta": {
+      "title": "Trellis2 - Export Mesh"
+    }
+  },
+  "1805:399": {
+    "inputs": {
+      "resolution": 512,
+      "shape_steps": 12,
+      "shape_guidance_strength": 7.5,
+      "shape_guidance_rescale": 0.5,
+      "shape_rescale_t": 3,
+      "shape_sampler": "heun",
+      "shape_guidance_interval_start": 0.6,
+      "shape_guidance_interval_end": 1,
+      "verbose": false,
+      "dino_lock": 0.65,
+      "dino_substeps": 2,
+      "dino_foundation_cap": 0.92,
+      "pipeline": [
+        "1805:398",
+        2
+      ],
+      "image_cond": [
+        "1805:397",
+        0
+      ],
+      "coords": [
+        "1805:398",
+        0
+      ],
+      "image": [
+        "1805:410",
+        0
+      ],
+      "moge_camera_config": [
+        "1805:1686",
+        0
+      ]
+    },
+    "class_type": "Trellis2ShapeGenerator",
+    "_meta": {
+      "title": "Trellis2 - Shape Generator"
+    }
+  },
+  "1805:1686": {
+    "inputs": {
+      "fov": 0.1,
+      "unit": "rad",
+      "extend_pixel": 0,
+      "mesh_scale": 1
+    },
+    "class_type": "Trellis2FovMoGeCameraConfig",
+    "_meta": {
+      "title": "Trellis2 - Fov MoGe Camera Config"
+    }
+  },
+  "1805:410": {
+    "inputs": {
+      "padding": 5,
+      "remove_background": false,
+      "max_size": 1024,
+      "image": [
+        "1775",
+        2
+      ]
+    },
+    "class_type": "Trellis2PreProcessImage",
+    "_meta": {
+      "title": "Trellis2 - PreProcess Image"
+    }
+  },
+  "1805:400": {
+    "inputs": {
+      "from_resolution": [
+        "1805:399",
+        1
+      ],
+      "to_resolution": 1024,
+      "sparse_structure_resolution": [
+        "1805:398",
+        1
+      ],
+      "max_num_tokens": 999999,
+      "shape_steps": 12,
+      "shape_guidance_strength": 7.5,
+      "shape_guidance_rescale": 0.5,
+      "shape_rescale_t": 3,
+      "shape_sampler": "heun",
+      "shape_guidance_interval_start": 0.6,
+      "shape_guidance_interval_end": 1,
+      "verbose": false,
+      "dino_lock": 0.65,
+      "dino_substeps": 2,
+      "dino_foundation_cap": 0.92,
+      "pipeline": [
+        "1805:399",
+        2
+      ],
+      "image_cond": [
+        "1805:397",
+        1
+      ],
+      "shape_slat": [
+        "1805:399",
+        0
+      ],
+      "image": [
+        "1805:410",
+        0
+      ],
+      "moge_camera_config": [
+        "1805:1686",
+        0
+      ]
+    },
+    "class_type": "Trellis2ShapeCascadeGenerator",
+    "_meta": {
+      "title": "Trellis2 - Shape Cascade Generator"
+    }
+  },
+  "1805:397": {
+    "inputs": {
+      "max_views": 1,
+      "pipeline": [
+        "1805:396",
+        0
+      ],
+      "image": [
+        "1805:410",
+        0
+      ]
+    },
+    "class_type": "Trellis2ImageCondGenerator",
+    "_meta": {
+      "title": "Trellis2 - ImageCond Generator"
+    }
+  },
+  "1805:396": {
+    "inputs": {
+      "modelname": "microsoft/TRELLIS.2-4B",
+      "backend": "flash_attn",
+      "device": "cuda",
+      "low_vram": true,
+      "keep_models_loaded": false,
+      "conv_backend": "flex_gemm",
+      "sparse_backend": "flash_attn",
+      "use_reconviagen": false
+    },
+    "class_type": "Trellis2LoadModel",
+    "_meta": {
+      "title": "Trellis2 - LoadModel"
+    }
+  },
+  "1805:1688": {
+    "inputs": {
+      "mesh_cluster_threshold_cone_half_angle_rad": 60,
+      "mesh_cluster_refine_iterations": 0,
+      "mesh_cluster_global_iterations": 1,
+      "mesh_cluster_smooth_strength": 1,
+      "texture_size": [
+        "1783",
+        0
+      ],
+      "texture_alpha_mode": "OPAQUE",
+      "double_side_material": false,
+      "bake_on_vertices": false,
+      "use_custom_normals": true,
+      "inpainting": "telea",
+      "reorient_vertices": "90 degrees",
+      "mesh": [
+        "1805:1763",
+        0
+      ],
+      "bvh": [
+        "1805:401",
+        1
+      ]
+    },
+    "class_type": "Trellis2UnWrapAndRasterizer",
+    "_meta": {
+      "title": "Trellis2 - UV Unwrap and Rasterize"
+    }
+  },
+  "1805:1605": {
+    "inputs": {
+      "target_face_num": [
+        "1781",
+        0
+      ],
+      "method": "Cumesh",
+      "mesh": [
+        "1805:404",
+        0
+      ]
+    },
+    "class_type": "Trellis2SimplifyMesh",
+    "_meta": {
+      "title": "Trellis2 - Simplify Mesh"
+    }
+  },
+  "1805:398": {
+    "inputs": {
+      "seed": [
+        "1782",
+        0
+      ],
+      "sparse_structure_steps": 25,
+      "sparse_structure_guidance_strength": 7.5,
+      "sparse_structure_guidance_rescale": 0.01,
+      "sparse_structure_rescale_t": 5,
+      "sparse_structure_sampler": "heun",
+      "sparse_structure_resolution": 32,
+      "sparse_structure_guidance_interval_start": 0.1,
+      "sparse_structure_guidance_interval_end": 1,
+      "fill_holes": true,
+      "hole_iterations": 1,
+      "verbose": false,
+      "dino_lock": 0.65,
+      "dino_substeps": 2,
+      "hole_fill_algorithm": "flood_fill",
+      "dino_foundation_cap": 0.92,
+      "keep_only_shell": true,
+      "pipeline": [
+        "1805:397",
+        2
+      ],
+      "image_cond": [
+        "1805:397",
+        0
+      ],
+      "image": [
+        "1805:410",
+        0
+      ],
+      "moge_camera_config": [
+        "1805:1686",
+        0
+      ]
+    },
+    "class_type": "Trellis2SparseGenerator",
+    "_meta": {
+      "title": "Trellis2 - Sparse Generator"
+    }
+  },
+  "1805:1763": {
+    "inputs": {
+      "mesh": [
+        "1805:1605",
+        0
+      ]
+    },
+    "class_type": "Trellis2FillHolesWithMeshlib",
+    "_meta": {
+      "title": "Trellis2 - Fill Holes with Meshlib"
+    }
+  },
+  "1805:404": {
+    "inputs": {
+      "remesh_band": 1,
+      "resolution": 1024,
+      "remove_floaters": true,
+      "remove_inner_faces": true,
+      "mesh": [
+        "1805:401",
+        0
+      ]
+    },
+    "class_type": "Trellis2ReconstructMeshWithQuad",
+    "_meta": {
+      "title": "Trellis2 - Reconstruct Mesh With Quad"
+    }
+  },
+  "1805:1687": {
+    "inputs": {
+      "resolution": 1024,
+      "texture_steps": 12,
+      "texture_guidance_strength": 1,
+      "texture_guidance_rescale": 0,
+      "texture_rescale_t": 3,
+      "texture_sampler": "euler",
+      "texture_guidance_interval_start": 0.6,
+      "texture_guidance_interval_end": 0.9,
+      "verbose": false,
+      "dino_lock": 0,
+      "dino_substeps": 2,
+      "dino_foundation_cap": 0.92,
+      "from_resolution": [
+        "1805:400",
+        1
+      ],
+      "pipeline": [
+        "1805:400",
+        2
+      ],
+      "image_cond": [
+        "1805:397",
+        1
+      ],
+      "shape_slat": [
+        "1805:400",
+        0
+      ],
+      "image": [
+        "1805:410",
+        0
+      ],
+      "moge_camera_config": [
+        "1805:1686",
+        0
+      ]
+    },
+    "class_type": "Trellis2TexSlatGenerator",
+    "_meta": {
+      "title": "Trellis2 - Tex Slat Generator"
+    }
+  },
+  "1805:401": {
+    "inputs": {
+      "resolution": [
+        "1805:400",
+        1
+      ],
+      "use_tiled_decoder": true,
+      "pipeline": [
+        "1805:1687",
+        1
+      ],
+      "shape_slat": [
+        "1805:400",
+        0
+      ],
+      "texture_slat": [
+        "1805:1687",
+        0
+      ]
+    },
+    "class_type": "Trellis2DecodeLatents",
+    "_meta": {
+      "title": "Trellis2 - Decode Latents"
+    }
+  },
+  "1805:414": {
+    "inputs": {
+      "string_a": [
+        "1779",
+        0
+      ],
+      "string_b": "_TexturedMesh",
+      "delimiter": ""
+    },
+    "class_type": "StringConcatenate",
+    "_meta": {
+      "title": "Concatenate Text"
+    }
+  },
+  "101:6": {
+    "inputs": {
+      "model": "hunyuan3d-paint-v2-0"
+    },
+    "class_type": "DownloadAndLoadHy3DPaintModel",
+    "_meta": {
+      "title": "(Down)Load Hy3D PaintModel"
+    }
+  },
+  "101:7": {
+    "inputs": {
+      "scheduler": "Euler",
+      "sigmas": "default",
+      "pipeline": [
+        "101:6",
+        0
+      ]
+    },
+    "class_type": "Hy3DDiffusersSchedulerConfig",
+    "_meta": {
+      "title": "Hy3D Diffusers Scheduler Config"
+    }
+  },
+  "101:3": {
+    "inputs": {
+      "render_size": 1024,
+      "texture_size": 1024,
+      "generate_textured_maps": false,
+      "blender_exec_path": "",
+      "normal_space": "world",
+      "trimesh": [
+        "1805:468",
+        0
+      ],
+      "camera_config": [
+        "101:4",
+        0
+      ]
+    },
+    "class_type": "Hy3DRenderMultiView",
+    "_meta": {
+      "title": "Hy3D Render MultiView"
+    }
+  },
+  "101:8": {
+    "inputs": {
+      "view_size": 1024,
+      "steps": 10,
+      "seed": 12345,
+      "denoise_strength": 1,
+      "pipeline": [
+        "101:6",
+        0
+      ],
+      "ref_image": [
+        "1775",
+        0
+      ],
+      "normal_maps": [
+        "101:3",
+        0
+      ],
+      "position_maps": [
+        "101:3",
+        1
+      ],
+      "camera_config": [
+        "101:4",
+        0
+      ],
+      "scheduler": [
+        "101:7",
+        0
+      ]
+    },
+    "class_type": "Hy3DSampleMultiView",
+    "_meta": {
+      "title": "Hy3D Sample MultiView"
+    }
+  },
+  "101:4": {
+    "inputs": {
+      "camera_azimuths": [
+        "91",
+        0
+      ],
+      "camera_elevations": [
+        "92",
+        0
+      ],
+      "view_weights": [
+        "93",
+        0
+      ],
+      "camera_distance": 1.1,
+      "ortho_scale": 1.2
+    },
+    "class_type": "Hy3DCameraConfig",
+    "_meta": {
+      "title": "Hy3D Camera Config"
+    }
+  },
+  "1792:1787": {
+    "inputs": {
+      "model": "hunyuan3d-paint-v2-0"
+    },
+    "class_type": "DownloadAndLoadHy3DPaintModel",
+    "_meta": {
+      "title": "(Down)Load Hy3D PaintModel"
+    }
+  },
+  "1792:1788": {
+    "inputs": {
+      "scheduler": "Euler",
+      "sigmas": "default",
+      "pipeline": [
+        "1792:1787",
+        0
+      ]
+    },
+    "class_type": "Hy3DDiffusersSchedulerConfig",
+    "_meta": {
+      "title": "Hy3D Diffusers Scheduler Config"
+    }
+  },
+  "1792:1789": {
+    "inputs": {
+      "render_size": 1024,
+      "texture_size": 1024,
+      "generate_textured_maps": false,
+      "blender_exec_path": "",
+      "normal_space": "world",
+      "trimesh": [
+        "1799",
+        1
+      ],
+      "camera_config": [
+        "1792:1791",
+        0
+      ]
+    },
+    "class_type": "Hy3DRenderMultiView",
+    "_meta": {
+      "title": "Hy3D Render MultiView"
+    }
+  },
+  "1792:1790": {
+    "inputs": {
+      "view_size": 1024,
+      "steps": 10,
+      "seed": 12345,
+      "denoise_strength": 1,
+      "pipeline": [
+        "1792:1787",
+        0
+      ],
+      "ref_image": [
+        "1775",
+        0
+      ],
+      "normal_maps": [
+        "1792:1789",
+        0
+      ],
+      "position_maps": [
+        "1792:1789",
+        1
+      ],
+      "camera_config": [
+        "1792:1791",
+        0
+      ],
+      "scheduler": [
+        "1792:1788",
+        0
+      ]
+    },
+    "class_type": "Hy3DSampleMultiView",
+    "_meta": {
+      "title": "Hy3D Sample MultiView"
+    }
+  },
+  "1792:1791": {
+    "inputs": {
+      "camera_azimuths": [
+        "1796",
+        0
+      ],
+      "camera_elevations": [
+        "1797",
+        0
+      ],
+      "view_weights": [
+        "1798",
+        0
+      ],
+      "camera_distance": 1.1,
+      "ortho_scale": 1.2
+    },
+    "class_type": "Hy3DCameraConfig",
+    "_meta": {
+      "title": "Hy3D Camera Config"
+    }
+  }
+}

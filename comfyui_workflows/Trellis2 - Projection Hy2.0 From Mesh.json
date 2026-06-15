@@ -1,0 +1,644 @@
+{
+  "89": {
+    "inputs": {
+      "texture_size": 2048,
+      "blend_texture": true,
+      "blend_exponent": 2,
+      "ortho_scale": 1.2,
+      "norm_size": 1.15,
+      "fill_holes": true,
+      "max_hole_size": 20,
+      "use_metallic": false,
+      "depth_eps": 0.01,
+      "mesh_cluster_threshold_cone_half_angle_rad": 60,
+      "add_alpha_channel": false,
+      "front_weight": 1,
+      "back_weight": 1,
+      "left_weight": 1,
+      "right_weight": 1,
+      "top_weight": 1,
+      "bottom_weight": 1,
+      "custom_azimuths": [
+        "1800",
+        0
+      ],
+      "custom_elevations": [
+        "1801",
+        0
+      ],
+      "custom_weights": [
+        "1802",
+        0
+      ],
+      "trimesh": [
+        "1811",
+        0
+      ],
+      "custom_images": [
+        "1803",
+        0
+      ]
+    },
+    "class_type": "Trellis2MultiViewTexturing",
+    "_meta": {
+      "title": "Trellis2 - Projection MultiView Texturing"
+    }
+  },
+  "90": {
+    "inputs": {
+      "model": "RMBG-2.0",
+      "sensitivity": 1,
+      "process_res": 1024,
+      "mask_blur": 0,
+      "mask_offset": 0,
+      "invert_output": false,
+      "refine_foreground": false,
+      "background": "Alpha",
+      "background_color": "#222222",
+      "image": [
+        "101:8",
+        0
+      ]
+    },
+    "class_type": "RMBG",
+    "_meta": {
+      "title": "Remove Background (RMBG)"
+    }
+  },
+  "91": {
+    "inputs": {
+      "value": "0,90,180,270,0,0,135"
+    },
+    "class_type": "PrimitiveString",
+    "_meta": {
+      "title": "Azimuths1"
+    }
+  },
+  "92": {
+    "inputs": {
+      "value": "0,0,0,0,90,-90,-20"
+    },
+    "class_type": "PrimitiveString",
+    "_meta": {
+      "title": "Elevations1"
+    }
+  },
+  "93": {
+    "inputs": {
+      "value": "1,0.5,1,0.5,0.5,0.5,0.5"
+    },
+    "class_type": "PrimitiveString",
+    "_meta": {
+      "title": "Weights1"
+    }
+  },
+  "94": {
+    "inputs": {
+      "filename_prefix": [
+        "1785",
+        0
+      ],
+      "images": [
+        "90",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  },
+  "95": {
+    "inputs": {
+      "filename_prefix": [
+        "1784",
+        0
+      ],
+      "file_format": "glb",
+      "trimesh": [
+        "89",
+        0
+      ]
+    },
+    "class_type": "Trellis2ExportMesh",
+    "_meta": {
+      "title": "Trellis2 - Export Mesh"
+    }
+  },
+  "96": {
+    "inputs": {
+      "model_file": [
+        "95",
+        0
+      ],
+      "image": ""
+    },
+    "class_type": "Preview3D",
+    "_meta": {
+      "title": "Preview 3D & Animation"
+    }
+  },
+  "1775": {
+    "inputs": {
+      "image": "sylized orc warrior.png"
+    },
+    "class_type": "Trellis2LoadImageWithTransparency",
+    "_meta": {
+      "title": "Trellis2 - Load Image with Transparency"
+    }
+  },
+  "1777": {
+    "inputs": {
+      "value": "Orc_XViews_Hy20"
+    },
+    "class_type": "PrimitiveString",
+    "_meta": {
+      "title": "Name"
+    }
+  },
+  "1778": {
+    "inputs": {
+      "string_a": "3D/",
+      "string_b": [
+        "1777",
+        0
+      ],
+      "delimiter": ""
+    },
+    "class_type": "StringConcatenate",
+    "_meta": {
+      "title": "Concatenate Text"
+    }
+  },
+  "1779": {
+    "inputs": {
+      "string_a": [
+        "1778",
+        0
+      ],
+      "string_b": [
+        "1777",
+        0
+      ],
+      "delimiter": "/"
+    },
+    "class_type": "StringConcatenate",
+    "_meta": {
+      "title": "Concatenate Text"
+    }
+  },
+  "1784": {
+    "inputs": {
+      "string_a": [
+        "1779",
+        0
+      ],
+      "string_b": "_TexturedMesh_MV",
+      "delimiter": ""
+    },
+    "class_type": "StringConcatenate",
+    "_meta": {
+      "title": "Concatenate Text"
+    }
+  },
+  "1785": {
+    "inputs": {
+      "string_a": [
+        "1779",
+        0
+      ],
+      "string_b": "_NoBG",
+      "delimiter": ""
+    },
+    "class_type": "StringConcatenate",
+    "_meta": {
+      "title": "Concatenate Text"
+    }
+  },
+  "1793": {
+    "inputs": {
+      "model": "RMBG-2.0",
+      "sensitivity": 1,
+      "process_res": 1024,
+      "mask_blur": 0,
+      "mask_offset": 0,
+      "invert_output": false,
+      "refine_foreground": false,
+      "background": "Alpha",
+      "background_color": "#222222",
+      "image": [
+        "1792:1790",
+        0
+      ]
+    },
+    "class_type": "RMBG",
+    "_meta": {
+      "title": "Remove Background (RMBG)"
+    }
+  },
+  "1794": {
+    "inputs": {
+      "string_a": [
+        "1779",
+        0
+      ],
+      "string_b": "_NoBG",
+      "delimiter": ""
+    },
+    "class_type": "StringConcatenate",
+    "_meta": {
+      "title": "Concatenate Text"
+    }
+  },
+  "1795": {
+    "inputs": {
+      "filename_prefix": [
+        "1794",
+        0
+      ],
+      "images": [
+        "1793",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  },
+  "1796": {
+    "inputs": {
+      "value": "45,315,45,315,135,225,225"
+    },
+    "class_type": "PrimitiveString",
+    "_meta": {
+      "title": "Azimuths2"
+    }
+  },
+  "1797": {
+    "inputs": {
+      "value": "-20,-20,20,20,20,20,-20"
+    },
+    "class_type": "PrimitiveString",
+    "_meta": {
+      "title": "Elevations2"
+    }
+  },
+  "1798": {
+    "inputs": {
+      "value": "0.5,0.5,0.5,0.5,0.5,0.5,0.5"
+    },
+    "class_type": "PrimitiveString",
+    "_meta": {
+      "title": "Weights2"
+    }
+  },
+  "1799": {
+    "inputs": {
+      "input_1": [
+        "90",
+        0
+      ],
+      "input_2": [
+        "1811",
+        0
+      ]
+    },
+    "class_type": "Trellis2Continue",
+    "_meta": {
+      "title": "Trellis2 - Continue"
+    }
+  },
+  "1800": {
+    "inputs": {
+      "string_a": [
+        "91",
+        0
+      ],
+      "string_b": [
+        "1796",
+        0
+      ],
+      "delimiter": ","
+    },
+    "class_type": "StringConcatenate",
+    "_meta": {
+      "title": "Azimuths"
+    }
+  },
+  "1801": {
+    "inputs": {
+      "string_a": [
+        "92",
+        0
+      ],
+      "string_b": [
+        "1797",
+        0
+      ],
+      "delimiter": ","
+    },
+    "class_type": "StringConcatenate",
+    "_meta": {
+      "title": "Elevations"
+    }
+  },
+  "1802": {
+    "inputs": {
+      "string_a": [
+        "93",
+        0
+      ],
+      "string_b": [
+        "1798",
+        0
+      ],
+      "delimiter": ","
+    },
+    "class_type": "StringConcatenate",
+    "_meta": {
+      "title": "Weights"
+    }
+  },
+  "1803": {
+    "inputs": {
+      "images.image0": [
+        "90",
+        0
+      ],
+      "images.image1": [
+        "1793",
+        0
+      ]
+    },
+    "class_type": "BatchImagesNode",
+    "_meta": {
+      "title": "Batch Images"
+    }
+  },
+  "1808": {
+    "inputs": {
+      "filename_prefix": [
+        "1779",
+        0
+      ],
+      "subfolder_dir": "",
+      "filename": "_camera_config",
+      "text": [
+        "1810",
+        0
+      ]
+    },
+    "class_type": "SaveTextCustomNode",
+    "_meta": {
+      "title": "Save Text Custom Node"
+    }
+  },
+  "1809": {
+    "inputs": {
+      "string_a": [
+        "1800",
+        0
+      ],
+      "string_b": [
+        "1801",
+        0
+      ],
+      "delimiter": "#"
+    },
+    "class_type": "StringConcatenate",
+    "_meta": {
+      "title": "All Texts"
+    }
+  },
+  "1810": {
+    "inputs": {
+      "string_a": [
+        "1809",
+        0
+      ],
+      "string_b": [
+        "1802",
+        0
+      ],
+      "delimiter": "#"
+    },
+    "class_type": "StringConcatenate",
+    "_meta": {
+      "title": "All Texts"
+    }
+  },
+  "1811": {
+    "inputs": {
+      "glb_path": ""
+    },
+    "class_type": "Trellis2LoadMesh",
+    "_meta": {
+      "title": "Trellis2 - Load Mesh"
+    }
+  },
+  "101:6": {
+    "inputs": {
+      "model": "hunyuan3d-paint-v2-0"
+    },
+    "class_type": "DownloadAndLoadHy3DPaintModel",
+    "_meta": {
+      "title": "(Down)Load Hy3D PaintModel"
+    }
+  },
+  "101:7": {
+    "inputs": {
+      "scheduler": "Euler",
+      "sigmas": "default",
+      "pipeline": [
+        "101:6",
+        0
+      ]
+    },
+    "class_type": "Hy3DDiffusersSchedulerConfig",
+    "_meta": {
+      "title": "Hy3D Diffusers Scheduler Config"
+    }
+  },
+  "101:3": {
+    "inputs": {
+      "render_size": 1024,
+      "texture_size": 1024,
+      "generate_textured_maps": false,
+      "blender_exec_path": "",
+      "normal_space": "world",
+      "trimesh": [
+        "1811",
+        0
+      ],
+      "camera_config": [
+        "101:4",
+        0
+      ]
+    },
+    "class_type": "Hy3DRenderMultiView",
+    "_meta": {
+      "title": "Hy3D Render MultiView"
+    }
+  },
+  "101:8": {
+    "inputs": {
+      "view_size": 1024,
+      "steps": 10,
+      "seed": 12345,
+      "denoise_strength": 1,
+      "pipeline": [
+        "101:6",
+        0
+      ],
+      "ref_image": [
+        "1775",
+        0
+      ],
+      "normal_maps": [
+        "101:3",
+        0
+      ],
+      "position_maps": [
+        "101:3",
+        1
+      ],
+      "camera_config": [
+        "101:4",
+        0
+      ],
+      "scheduler": [
+        "101:7",
+        0
+      ]
+    },
+    "class_type": "Hy3DSampleMultiView",
+    "_meta": {
+      "title": "Hy3D Sample MultiView"
+    }
+  },
+  "101:4": {
+    "inputs": {
+      "camera_azimuths": [
+        "91",
+        0
+      ],
+      "camera_elevations": [
+        "92",
+        0
+      ],
+      "view_weights": [
+        "93",
+        0
+      ],
+      "camera_distance": 1.1,
+      "ortho_scale": 1.2
+    },
+    "class_type": "Hy3DCameraConfig",
+    "_meta": {
+      "title": "Hy3D Camera Config"
+    }
+  },
+  "1792:1787": {
+    "inputs": {
+      "model": "hunyuan3d-paint-v2-0"
+    },
+    "class_type": "DownloadAndLoadHy3DPaintModel",
+    "_meta": {
+      "title": "(Down)Load Hy3D PaintModel"
+    }
+  },
+  "1792:1788": {
+    "inputs": {
+      "scheduler": "Euler",
+      "sigmas": "default",
+      "pipeline": [
+        "1792:1787",
+        0
+      ]
+    },
+    "class_type": "Hy3DDiffusersSchedulerConfig",
+    "_meta": {
+      "title": "Hy3D Diffusers Scheduler Config"
+    }
+  },
+  "1792:1789": {
+    "inputs": {
+      "render_size": 1024,
+      "texture_size": 1024,
+      "generate_textured_maps": false,
+      "blender_exec_path": "",
+      "normal_space": "world",
+      "trimesh": [
+        "1799",
+        1
+      ],
+      "camera_config": [
+        "1792:1791",
+        0
+      ]
+    },
+    "class_type": "Hy3DRenderMultiView",
+    "_meta": {
+      "title": "Hy3D Render MultiView"
+    }
+  },
+  "1792:1790": {
+    "inputs": {
+      "view_size": 1024,
+      "steps": 10,
+      "seed": 12345,
+      "denoise_strength": 1,
+      "pipeline": [
+        "1792:1787",
+        0
+      ],
+      "ref_image": [
+        "1775",
+        0
+      ],
+      "normal_maps": [
+        "1792:1789",
+        0
+      ],
+      "position_maps": [
+        "1792:1789",
+        1
+      ],
+      "camera_config": [
+        "1792:1791",
+        0
+      ],
+      "scheduler": [
+        "1792:1788",
+        0
+      ]
+    },
+    "class_type": "Hy3DSampleMultiView",
+    "_meta": {
+      "title": "Hy3D Sample MultiView"
+    }
+  },
+  "1792:1791": {
+    "inputs": {
+      "camera_azimuths": [
+        "1796",
+        0
+      ],
+      "camera_elevations": [
+        "1797",
+        0
+      ],
+      "view_weights": [
+        "1798",
+        0
+      ],
+      "camera_distance": 1.1,
+      "ortho_scale": 1.2
+    },
+    "class_type": "Hy3DCameraConfig",
+    "_meta": {
+      "title": "Hy3D Camera Config"
+    }
+  }
+}

@@ -21,6 +21,17 @@ const STATUS_MAP = {
 
 const CHANGE_LOG_ENTRIES = [
   {
+    version: 'v1.0.5',
+    date: '2026-06-15',
+    items: [
+			'Can export mesh from MeshPreviewer and MeshEditor',
+			'Fixed "Fill Holes" in MeshEditor - Projection mode',
+			'Fixed ComfyUI Workflows for Mesh Projection with QwenImageEdit',
+			'Setup Wizard: Added support for Image Upscale Models',
+			'Added/Updated example workflows'
+    ],
+  },
+  {
     version: 'v1.0.4',
     date: '2026-06-12',
     items: [

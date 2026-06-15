@@ -1,4 +1,4 @@
 {
-	"version": "1.0.4",
-	"message": "Can use Mask in MeshEditor - Projection mode"
+	"version": "1.0.5",
+	"message": "Can export mesh from MeshPreviewer and MeshEditor"
 }
