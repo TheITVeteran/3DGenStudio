@@ -22,6 +22,15 @@ const PRESETS = [
 
 const CHANGE_LOG_ENTRIES = [
   {
+    version: 'v1.1.0',
+    date: '2026-06-16',
+    items: [
+			'Assets page: Can group by project',
+			'Assets page: Reworked on Workflows layout',
+			'Projects page: Cleaned the layout and added rename button',
+    ],
+  },
+  {
     version: 'v1.0.5',
     date: '2026-06-15',
     items: [
