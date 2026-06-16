@@ -155,6 +155,9 @@
 			"LoRA":[        
 				{ "FileName": "Qwen-Image-2512-Lightning-4steps-V1.0-bf16.safetensors", "Url": "https://huggingface.co/lightx2v/Qwen-Image-2512-Lightning/resolve/main/Qwen-Image-2512-Lightning-4steps-V1.0-bf16.safetensors?download=true", "Size": 0.9 }
 			],
+			"ControlNet":[
+				{ "FileName": "Qwen-Image-2512-Fun-Controlnet-Union-2602.safetensors", "Url": "https://huggingface.co/alibaba-pai/Qwen-Image-2512-Fun-Controlnet-Union/resolve/main/Qwen-Image-2512-Fun-Controlnet-Union-2602.safetensors?download=true", "Size": 3.5 }
+			],			
 			"Workflows": [
 				{
 					"Name": "Gen Image with Qwen 2512",
@@ -167,7 +170,21 @@
 					"Outputs": [
 						{ "Node": "90", "Name": "Save Image", "Type": "Image" }
 					]
-				}
+				},
+				{
+					"Name": "Gen T-Pose Character with Qwen 2512",
+					"File": "setup/Gen T-Pose Character with QwenImage2512.json",
+					"Inputs": [
+						{ "Node": "112", "Input": "text",  "Name": "Prompt", "Type": "String" },
+						{ "Node": "116", "Input": "seed",  "Name": "Seed",   "Type": "Number" },
+						{ "Node": "116", "Input": "steps", "Name": "Steps",  "Type": "Number" },
+						{ "Node": "136", "Input": "image", "Name": "Human Position Image",  "Type": "Image" },
+						{ "Node": "137", "Input": "value", "Name": "Image Size",  "Type": "Number" }
+					],
+					"Outputs": [
+						{ "Node": "90", "Name": "Save Image", "Type": "Image" }
+					]
+				}				
 			]
 		},
 		{
