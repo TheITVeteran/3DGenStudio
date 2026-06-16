@@ -411,6 +411,51 @@
   border-color: #ac89ff;
 }
 
+/* Veil shown while a released projection mask stroke (or a Clear/Fill) is being
+   applied. The pulsing is a compositor-accelerated animation so it keeps running
+   smoothly even while the (brief) synchronous compose blocks the main thread. It
+   also blocks pointer interaction with the canvas underneath. */
+.mesh-editor-mask-applying {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.12);
+  cursor: progress;
+  pointer-events: all;
+  animation: mesh-editor-mask-applying-pulse 1s ease-in-out infinite;
+}
+
+.mesh-editor-mask-applying__badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: var(--radius-md, 8px);
+  border: 1px solid rgba(143, 245, 255, 0.45);
+  background: rgba(16, 17, 20, 0.82);
+  backdrop-filter: blur(4px);
+  color: rgba(235, 248, 255, 0.95);
+  font-size: 0.85rem;
+  letter-spacing: 0.02em;
+}
+
+.mesh-editor-mask-applying__badge .material-symbols-outlined {
+  animation: mesh-editor-mask-applying-spin 1.1s linear infinite;
+}
+
+@keyframes mesh-editor-mask-applying-pulse {
+  0%, 100% { background: rgba(255, 255, 255, 0.08); }
+  50% { background: rgba(255, 255, 255, 0.2); }
+}
+
+@keyframes mesh-editor-mask-applying-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 .mesh-editor-layer-card__color {
   width: 22px;
   height: 22px;
