@@ -302,7 +302,7 @@ const GraphValueNode = memo(function GraphValueNode({ data }) {
                           value={draft.workflowId || ''}
                           onChange={event => data.onDraftFieldChange?.(data.id, 'workflowId', event.target.value)}
                         >
-                          {textWorkflows.map(workflow => (
+                          {[...textWorkflows].sort((a, b) => (a.name || '').localeCompare(b.name || '')).map(workflow => (
                             <option key={workflow.id} value={workflow.id}>{workflow.name}</option>
                           ))}
                         </select>
