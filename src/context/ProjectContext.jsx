@@ -171,6 +171,31 @@ export function ProjectProvider({ children }) {
     return data
   }
 
+  const deleteAssetVersion = async ({ filePath, force = false }) => {
+    const params = new URLSearchParams({ filePath })
+    if (force) {
+      params.set('force', 'true')
+    }
+    const res = await fetch(`${API_BASE}/assets/library/versions?${params.toString()}`, {
+      method: 'DELETE'
+    })
+
+    if (res.status === 204) {
+      return { deleted: true }
+    }
+
+    const data = await res.json().catch(() => ({}))
+
+    if (!res.ok) {
+      const error = new Error(data?.error || 'Failed to delete mesh version')
+      error.status = res.status
+      error.details = data
+      throw error
+    }
+
+    return data
+  }
+
   const renameAssetEdit = async ({ filePath, name }) => {
     const res = await fetch(`${API_BASE}/assets/library/edits`, {
       method: 'PUT',
@@ -1011,6 +1036,7 @@ export function ProjectProvider({ children }) {
       renameLibraryAsset,
       renameAssetEdit,
       deleteAssetEdit,
+      deleteAssetVersion,
       getAttributeTypes,
       getProjectCardAttributes,
       createCardAttribute,

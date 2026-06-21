@@ -2703,6 +2703,119 @@ export async function deleteAssetEditByFilePath(filePath) {
   };
 }
 
+// Escape characters that are wildcards in a SQL LIKE pattern so a filePath
+// (which can legitimately contain "_") is matched literally.
+function escapeLikePattern(value) {
+  return String(value || '').replace(/[\\%_]/g, char => `\\${char}`);
+}
+
+// A mesh version (child asset) can be referenced by a project through either a
+// Kanban card or a Graph node — directly (assetId) or as a selected source
+// (an "edit:<filePath>" reference held in a card attribute or node metadata).
+// Returns the first project found, or null when the version is unlinked.
+async function findProjectLinkedToVersion(db, versionId, editReference) {
+  // 1. Kanban card with this version selected as a workflow input source.
+  const cardAttribute = await get(
+    db,
+    `SELECT c.projectId, p.name AS projectName
+     FROM Cards_Attributes attr
+     JOIN Cards c ON c.id = attr.cardId
+     LEFT JOIN Projects p ON p.id = c.projectId
+     WHERE attr.attributeValue = ?
+     ORDER BY c.creationDate DESC, c.id DESC
+     LIMIT 1`,
+    [editReference]
+  );
+  if (cardAttribute) return cardAttribute;
+
+  // 2. Kanban card with this version directly attached.
+  const cardAsset = await get(
+    db,
+    `SELECT c.projectId, p.name AS projectName
+     FROM Cards_Assets ca
+     JOIN Cards c ON c.id = ca.cardId
+     LEFT JOIN Projects p ON p.id = c.projectId
+     WHERE ca.assetId = ?
+     ORDER BY c.creationDate DESC, c.id DESC
+     LIMIT 1`,
+    [versionId]
+  );
+  if (cardAsset) return cardAsset;
+
+  // 3. Graph node directly attached to this version.
+  const nodeAsset = await get(
+    db,
+    `SELECT n.projectId, p.name AS projectName
+     FROM Nodes n
+     LEFT JOIN Projects p ON p.id = n.projectId
+     WHERE n.assetId = ?
+     ORDER BY n.creationDate DESC, n.id DESC
+     LIMIT 1`,
+    [versionId]
+  );
+  if (nodeAsset) return nodeAsset;
+
+  // 4. Graph node with this version selected as a source (stored in metadata JSON).
+  const nodeMetadata = await get(
+    db,
+    `SELECT n.projectId, p.name AS projectName
+     FROM Nodes n
+     LEFT JOIN Projects p ON p.id = n.projectId
+     WHERE n.metadata LIKE ? ESCAPE '\\'
+     ORDER BY n.creationDate DESC, n.id DESC
+     LIMIT 1`,
+    [`%${escapeLikePattern(editReference)}%`]
+  );
+  if (nodeMetadata) return nodeMetadata;
+
+  return null;
+}
+
+export async function deleteAssetVersionByFilePath(filePath, { force = false } = {}) {
+  const db = await getDb();
+  const storedFilePath = toStoredAssetPath('mesh', filePath);
+
+  const version = await get(
+    db,
+    `SELECT id, parentId, filePath, thumbnail
+     FROM Assets
+     WHERE filePath = ?
+       AND parentId IS NOT NULL
+     LIMIT 1`,
+    [storedFilePath]
+  );
+
+  if (!version) {
+    return { status: 'not-found' };
+  }
+
+  const editReference = `edit:${version.filePath}`;
+  const linkedProject = await findProjectLinkedToVersion(db, version.id, editReference);
+
+  if (linkedProject && !force) {
+    return {
+      status: 'linked',
+      projectId: linkedProject.projectId,
+      projectName: linkedProject.projectName || null
+    };
+  }
+
+  // Force delete (or unlinked): detach any project references so cards/nodes
+  // don't keep pointing at a file that no longer exists. Node.assetId is
+  // ON DELETE SET NULL, so direct graph-node attachments clear when the row goes.
+  await run(db, 'DELETE FROM Cards_Attributes WHERE attributeValue = ?', [editReference]);
+  await run(db, 'DELETE FROM Cards_Assets WHERE assetId = ?', [version.id]);
+
+  await run(db, 'DELETE FROM Assets WHERE id = ? AND parentId IS NOT NULL', [version.id]);
+
+  // Only the mesh file itself is removed — the thumbnail is typically inherited
+  // from (shared with) the parent asset, so deleting it would break the parent.
+  const absoluteFilePath = toAbsoluteStoragePath(version.filePath);
+  await fs.rm(absoluteFilePath, { force: true }).catch(() => null);
+
+  return { status: 'deleted' };
+}
+
 export async function deleteLibraryAssetByFilePath(type, filePath, { force = false } = {}) {
   const db = await getDb();
   const storedFilePath = toStoredAssetPath(type, filePath);

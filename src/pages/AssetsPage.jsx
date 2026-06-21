@@ -282,6 +282,7 @@ export default function AssetsPage() {
     renameLibraryAsset,
     renameAssetEdit,
     deleteAssetEdit,
+    deleteAssetVersion,
     deleteAsset,
     getComfyWorkflows,
     inspectComfyWorkflow,
@@ -323,6 +324,7 @@ export default function AssetsPage() {
   const [renamingEditName, setRenamingEditName] = useState('')
   const [renamingEditKey, setRenamingEditKey] = useState(null)
   const [deletingEditKey, setDeletingEditKey] = useState(null)
+  const [deletingVersionKey, setDeletingVersionKey] = useState(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [projectFilter, setProjectFilter] = useState('all')
   const [groupByProject, setGroupByProject] = useState(false)
@@ -782,6 +784,55 @@ export default function AssetsPage() {
     }
   }
 
+  const handleDeleteMeshVersion = async (parentAsset, version, { force = false } = {}) => {
+    if (!version?.filePath) {
+      return
+    }
+
+    if (!force) {
+      const confirmed = window.confirm(`Delete version "${version.name?.trim() || 'Unnamed version'}"?`)
+      if (!confirmed) {
+        return
+      }
+    }
+
+    setDeletingVersionKey(version.filePath)
+    setImportFeedback(null)
+
+    try {
+      await deleteAssetVersion({ filePath: version.filePath, force })
+
+      const data = await getLibraryAssets()
+      setLibraryAssets(data)
+
+      const refreshedAsset = (data.meshes || []).find(item => item.filename === parentAsset.filename)
+      setMeshVersionsAsset(refreshedAsset || { ...parentAsset, children: [], edits: [], childCount: 0, editCount: 0 })
+      setLinkedAssetDialog(null)
+      setImportFeedback({
+        type: 'success',
+        message: 'Mesh version deleted.'
+      })
+    } catch (err) {
+      if (err.status === 409) {
+        setLinkedAssetDialog({
+          kind: 'version',
+          parentAsset,
+          version,
+          assetName: version.name?.trim() || 'Mesh version',
+          projectId: err.details?.projectId,
+          projectName: err.details?.projectName || null
+        })
+      } else {
+        setImportFeedback({
+          type: 'error',
+          message: err.message || 'Failed to delete mesh version.'
+        })
+      }
+    } finally {
+      setDeletingVersionKey(null)
+    }
+  }
+
   const handleStartRenameAsset = (asset) => {
     setRenamingAsset(asset)
     setRenamingAssetName(asset.name || '')
@@ -874,6 +925,11 @@ export default function AssetsPage() {
   }
 
   const handleForceDeleteLinkedAsset = async () => {
+    if (linkedAssetDialog?.kind === 'version') {
+      await handleDeleteMeshVersion(linkedAssetDialog.parentAsset, linkedAssetDialog.version, { force: true })
+      return
+    }
+
     if (!linkedAssetDialog?.asset) {
       return
     }
@@ -1185,7 +1241,7 @@ export default function AssetsPage() {
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
 
       {linkedAssetDialog && (
-        <div className="assets-dialog-overlay" role="presentation" onClick={() => setLinkedAssetDialog(null)}>
+        <div className="assets-dialog-overlay assets-dialog-overlay--elevated" role="presentation" onClick={() => setLinkedAssetDialog(null)}>
           <div className="assets-dialog" role="dialog" aria-modal="true" aria-labelledby="linked-asset-dialog-title" onClick={event => event.stopPropagation()}>
             <div className="assets-dialog__header">
               <h2 id="linked-asset-dialog-title" className="assets-dialog__title font-headline">Asset linked to a project</h2>
@@ -1208,7 +1264,9 @@ export default function AssetsPage() {
                 type="button"
                 className="assets-dialog__btn assets-dialog__btn--danger"
                 onClick={handleForceDeleteLinkedAsset}
-                disabled={deletingAssetKey === `${linkedAssetDialog.asset?.type}:${linkedAssetDialog.asset?.filename}`}
+                disabled={linkedAssetDialog.kind === 'version'
+                  ? deletingVersionKey === linkedAssetDialog.version?.filePath
+                  : deletingAssetKey === `${linkedAssetDialog.asset?.type}:${linkedAssetDialog.asset?.filename}`}
               >
                 Delete Anyway
               </button>
@@ -1325,6 +1383,15 @@ export default function AssetsPage() {
                           <span className="asset-edit-card__title">{version.name?.trim() || `Version ${index + 1}`}</span>
                         </div>
                         <div className="asset-card__actions">
+                          <button
+                            type="button"
+                            className="asset-card__icon-btn"
+                            onClick={() => handleDeleteMeshVersion(meshVersionsAsset, version)}
+                            disabled={deletingVersionKey === version.filePath}
+                            title="Delete version"
+                          >
+                            <span className="material-symbols-outlined">delete</span>
+                          </button>
                           <button type="button" className="asset-card__link asset-card__link-btn" onClick={() => setMeshPreviewAsset(version)}>
                             OPEN
                           </button>

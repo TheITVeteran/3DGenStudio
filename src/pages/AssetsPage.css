@@ -851,6 +851,12 @@
   backdrop-filter: blur(10px);
 }
 
+/* Confirmation/warning dialog that can open on top of another dialog
+   (e.g. deleting a linked mesh version from the Mesh Versions dialog). */
+.assets-dialog-overlay--elevated {
+  z-index: 2200;
+}
+
 .assets-dialog {
   width: 100%;
   max-width: 520px;

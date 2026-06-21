@@ -32,6 +32,7 @@ import {
   deleteCard,
   deleteCardAttribute,
   deleteAssetEditByFilePath,
+  deleteAssetVersionByFilePath,
   deleteAssetById,
   deleteProjectConnection,
   deleteProjectNode,
@@ -160,6 +161,37 @@ app.delete('/api/assets/library/edits', async (req, res) => {
   } catch (err) {
     console.error('Failed to delete asset edit:', err);
     res.status(500).json({ error: err.message || 'Failed to delete asset edit' });
+  }
+});
+
+app.delete('/api/assets/library/versions', async (req, res) => {
+  try {
+    const { filePath, force } = req.query;
+
+    if (!filePath) {
+      return res.status(400).json({ error: 'filePath is required' });
+    }
+
+    const result = await deleteAssetVersionByFilePath(String(filePath), {
+      force: String(force || '').toLowerCase() === 'true'
+    });
+
+    if (result.status === 'linked') {
+      return res.status(409).json({
+        error: 'Mesh version is linked to a project',
+        projectId: result.projectId,
+        projectName: result.projectName || null
+      });
+    }
+
+    if (result.status === 'not-found') {
+      return res.status(404).json({ error: 'Mesh version not found' });
+    }
+
+    res.status(204).end();
+  } catch (err) {
+    console.error('Failed to delete mesh version:', err);
+    res.status(500).json({ error: err.message || 'Failed to delete mesh version' });
   }
 });
 
