@@ -22,6 +22,17 @@ const PRESETS = [
 
 const CHANGE_LOG_ENTRIES = [
   {
+    version: 'v1.1.3',
+    date: '2026-06-25',
+    items: [
+			'Mesh Editor: Added Wireframe toggle',
+			'Workflows: Can be shared',
+			'Tripo AI: Updated to v3',
+			'Graph Page: Fixed name used to save a mesh from an API',
+			'Run.bat: Fixed slowness'
+    ],
+  },
+  {
     version: 'v1.1.2',
     date: '2026-06-22',
     items: [

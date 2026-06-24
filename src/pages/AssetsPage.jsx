@@ -7,6 +7,7 @@ import SettingsModal from '../components/SettingsModal'
 import { useProjects } from '../context/ProjectContext'
 import { createMeshThumbnailFile, isMeshFile } from '../utils/meshThumbnail'
 import { parseAbrFile } from '../utils/brushAbr'
+import { downloadShareableWorkflow, isShareableWorkflow } from '../utils/workflowShare'
 import './AssetsPage.css'
 
 const ASSETS_PER_PAGE = 20
@@ -983,6 +984,16 @@ export default function AssetsPage() {
     }
   }
 
+  const handleShareWorkflow = (workflow) => {
+    try {
+      downloadShareableWorkflow(workflow)
+      setWorkflowFeedback(`Exported "${workflow.name}" as a .3dgw file.`)
+    } catch (err) {
+      console.error('Failed to export workflow:', err)
+      setWorkflowFeedback(err.message || 'Failed to export workflow')
+    }
+  }
+
   const handleWorkflowFileChange = async (event) => {
     const input = event.target
     const file = input.files?.[0]
@@ -991,6 +1002,56 @@ export default function AssetsPage() {
     try {
       const fileText = await file.text()
       const parsedJson = JSON.parse(fileText)
+
+      // A .3dgw bundle already carries its configured inputs/outputs, so import
+      // it directly instead of opening the configuration editor.
+      if (isShareableWorkflow(parsedJson)) {
+        const importedName = parsedJson.name?.trim() || file.name.replace(/\.[^.]+$/, '')
+
+        // Overwrite an existing same-named workflow in place (preserving its id,
+        // and therefore any graph/kanban references to it) when the user confirms.
+        const existingWorkflow = workflows.find(
+          workflow => (workflow.name || '').trim().toLowerCase() === importedName.toLowerCase()
+        )
+        if (existingWorkflow) {
+          const overwrite = window.confirm(
+            `A workflow named "${existingWorkflow.name}" already exists. Overwrite it with the imported workflow?`
+          )
+          if (!overwrite) {
+            setWorkflowFeedback('Import cancelled.')
+            return
+          }
+        }
+
+        setWorkflowSaving(true)
+        setWorkflowFeedback('')
+        try {
+          const payload = {
+            name: importedName,
+            workflowJson: parsedJson.workflowJson,
+            parameters: parsedJson.parameters || [],
+            outputs: parsedJson.outputs || []
+          }
+
+          if (existingWorkflow) {
+            await updateComfyWorkflow(existingWorkflow.id, payload)
+          } else {
+            await importComfyWorkflow(payload)
+          }
+
+          await loadWorkflows()
+          const inputCount = parsedJson.parameters?.length || 0
+          const outputCount = parsedJson.outputs?.length || 0
+          const verb = existingWorkflow ? 'Overwrote' : 'Imported'
+          setWorkflowFeedback(
+            `${verb} "${importedName}" with ${inputCount} input${inputCount !== 1 ? 's' : ''} and ${outputCount} output${outputCount !== 1 ? 's' : ''}.`
+          )
+        } finally {
+          setWorkflowSaving(false)
+        }
+        return
+      }
+
       const inspection = await inspectComfyWorkflow(parsedJson)
 
       setWorkflowName(file.name.replace(/\.[^.]+$/, ''))
@@ -1748,7 +1809,7 @@ export default function AssetsPage() {
             ref={workflowFileInputRef}
             type="file"
             className="assets-page__file-input"
-            accept="application/json,.json"
+            accept="application/json,.json,.3dgw"
             onChange={handleWorkflowFileChange}
           />
 
@@ -1871,6 +1932,9 @@ export default function AssetsPage() {
                                   <h4 className="workflow-card__name" title={workflow.name}>{workflow.name}</h4>
                                 </div>
                                 <div className="workflow-card__buttons">
+                                  <button type="button" className="library-icon-btn" onClick={() => handleShareWorkflow(workflow)} title="Share workflow (.3dgw)">
+                                    <span className="material-symbols-outlined">share</span>
+                                  </button>
                                   <button type="button" className="library-icon-btn" onClick={() => handleEditWorkflow(workflow)} title="Edit workflow">
                                     <span className="material-symbols-outlined">edit</span>
                                   </button>

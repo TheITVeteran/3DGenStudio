@@ -3087,10 +3087,16 @@ export async function createWorkflowRecord({ name, filePath, parameters = [], ou
   return await getWorkflowRecordById(assetId);
 }
 
-export async function updateWorkflowRecord(workflowId, { name, parameters = [], outputs = [] }) {
+export async function updateWorkflowRecord(workflowId, { name, parameters = [], outputs = [], filePath }) {
   const db = await getDb();
 
-  await run(db, 'UPDATE Assets SET name = ? WHERE id = ?', [name, workflowId]);
+  // filePath is only provided when the underlying graph is being replaced
+  // (e.g. overwriting an existing workflow with an imported .3dgw bundle).
+  if (filePath !== undefined) {
+    await run(db, 'UPDATE Assets SET name = ?, filePath = ? WHERE id = ?', [name, filePath, workflowId]);
+  } else {
+    await run(db, 'UPDATE Assets SET name = ? WHERE id = ?', [name, workflowId]);
+  }
   await run(
     db,
     `INSERT INTO WorkflowConfigs (assetId, parametersJson, outputsJson)

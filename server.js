@@ -300,7 +300,7 @@ app.post('/api/library/comfy-workflows', async (req, res) => {
 
 app.put('/api/library/comfy-workflows/:id', async (req, res) => {
   try {
-    const { name, parameters = [], outputs = [] } = req.body;
+    const { name, parameters = [], outputs = [], workflowJson } = req.body;
     const existingWorkflowRecord = await getWorkflowRecordById(Number(req.params.id));
 
     if (!existingWorkflowRecord) {
@@ -308,8 +308,17 @@ app.put('/api/library/comfy-workflows/:id', async (req, res) => {
     }
 
     const existingWorkflow = await buildWorkflowResponse(existingWorkflowRecord);
-    const availableParameters = new Map((existingWorkflow.availableInputs || []).map(input => [input.id, input]));
-    const availableOutputs = new Map((existingWorkflow.availableOutputs || []).map(output => [output.nodeId, output]));
+
+    // When a new graph is supplied (overwriting an existing workflow with an
+    // imported .3dgw bundle), validate the parameters/outputs against the NEW
+    // graph and persist it; otherwise keep the existing graph and only update
+    // its configuration.
+    const replacingGraph = workflowJson !== undefined && workflowJson !== null;
+    const parsedGraph = replacingGraph ? parseComfyWorkflow(workflowJson) : null;
+    const availableInputsSource = replacingGraph ? parsedGraph.inputs : (existingWorkflow.availableInputs || []);
+    const availableOutputsSource = replacingGraph ? parsedGraph.outputs : (existingWorkflow.availableOutputs || []);
+    const availableParameters = new Map(availableInputsSource.map(input => [input.id, input]));
+    const availableOutputs = new Map(availableOutputsSource.map(output => [output.nodeId, output]));
     const existingParameters = new Map((existingWorkflow.parameters || []).map(parameter => [parameter.id, parameter]));
 
     const nextParameters = parameters.map(parameter => {
@@ -356,11 +365,28 @@ app.put('/api/library/comfy-workflows/:id', async (req, res) => {
       return res.status(400).json({ error: 'Select at least one output node to save images from' });
     }
 
+    // Persist the new graph to disk (and remember the old file for cleanup)
+    // only once the configuration above has validated successfully.
+    let nextFilePath;
+    if (replacingGraph) {
+      nextFilePath = await saveWorkflowFile(name || existingWorkflow.name, workflowJson);
+    }
+
     const nextWorkflow = await updateWorkflowRecord(existingWorkflow.id, {
       name: sanitizeDisplayName(name || existingWorkflow.name, existingWorkflow.name),
       parameters: nextParameters,
-      outputs: nextOutputs
+      outputs: nextOutputs,
+      ...(replacingGraph ? { filePath: nextFilePath } : {})
     });
+
+    // Drop the superseded graph file now that the record points at the new one.
+    if (replacingGraph && existingWorkflowRecord.filePath && existingWorkflowRecord.filePath !== nextFilePath) {
+      try {
+        await fs.unlink(toAbsoluteStoragePath(existingWorkflowRecord.filePath));
+      } catch (cleanupErr) {
+        console.warn('Failed to remove superseded workflow file:', cleanupErr);
+      }
+    }
 
     res.json(await buildWorkflowResponse(nextWorkflow));
   } catch (err) {
