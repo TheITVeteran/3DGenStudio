@@ -452,7 +452,35 @@
 					]
 				}
 			]
-		}			
+		},
+		{
+			"Name": "Krea2 Turbo",
+			"Models": {
+				"Q8":   { "FileName": "krea2_turbo-Q8_0.gguf",   "Url": "https://huggingface.co/vantagewithai/Krea-2-Turbo-GGUF/resolve/main/krea2_turbo-Q8_0.gguf?download=true",   "Size": 13.7 },
+				"Q6":   { "FileName": "krea2_turbo-Q6_K.gguf",   "Url": "https://huggingface.co/vantagewithai/Krea-2-Turbo-GGUF/resolve/main/krea2_turbo-Q6_K.gguf?download=true",   "Size": 10.6 },
+				"Q5":   { "FileName": "krea2_turbo-Q5_K_M.gguf", "Url": "https://huggingface.co/vantagewithai/Krea-2-Turbo-GGUF/resolve/main/krea2_turbo-Q5_K_M.gguf?download=true", "Size": 8.87  },
+				"Q4":   { "FileName": "krea2_turbo-Q4_K_M.gguf", "Url": "https://huggingface.co/vantagewithai/Krea-2-Turbo-GGUF/resolve/main/krea2_turbo-Q4_K_M.gguf?download=true", "Size": 7.49  },
+				"Q3":   { "FileName": "krea2_turbo-Q3_K_M.gguf", "Url": "https://huggingface.co/vantagewithai/Krea-2-Turbo-GGUF/resolve/main/krea2_turbo-Q3_K_M.gguf?download=true", "Size": 6.01  },
+				"Q2":   { "FileName": "krea2_turbo-Q2_K.gguf",   "Url": "https://huggingface.co/vantagewithai/Krea-2-Turbo-GGUF/resolve/main/krea2_turbo-Q2_K.gguf?download=true",   "Size": 4.89  }
+			},
+			"VAE":         { "FileName": "qwen_image_vae.safetensors",            "Url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors?download=true",                          "Size": 0.3 },
+			"TextEncoder": { "FileName": "qwen3vl_4b_fp8_scaled.safetensors", "Url": "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/text_encoders/qwen3vl_4b_fp8_scaled.safetensors?download=true",          "Size": 5.24 },
+			"Workflows": [
+				{
+					"Name": "Gen Image with Krea2 Turbo",
+					"File": "setup/Gen Image with Krea2Turbo.json",
+					"Inputs": [
+						{ "Node": "6", "Input": "text",  "Name": "Prompt", "Type": "String" },
+						{ "Node": "2",  "Input": "seed",  "Name": "Seed",   "Type": "Number" },
+						{ "Node": "2",  "Input": "steps", "Name": "Steps",  "Type": "Number" },
+						{ "Node": "31",  "Input": "value", "Name": "Image Resolution",  "Type": "Number" }
+					],
+					"Outputs": [
+						{ "Node": "22", "Name": "Save Image", "Type": "Image" }
+					]
+				}
+			]
+		}
 	],
 	"OtherWorkflows":[
 		{
