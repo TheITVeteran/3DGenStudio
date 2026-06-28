@@ -8,6 +8,8 @@
     "dev:server": "node server.js",
     "dev:client": "vite",
     "build": "vite build",
+    "start": "node server.js",
+    "serve": "vite build && node server.js",
     "lint": "eslint .",
     "preview": "vite preview"
   },

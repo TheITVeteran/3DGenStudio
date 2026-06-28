@@ -137,6 +137,16 @@ app.use(express.json({ limit: '10mb' }));
 app.use('/assets', express.static(ASSETS_DIR));
 app.use('/wiki-media', express.static(WIKI_MEDIA_DIR));
 
+// Serve the production frontend build (vite build → dist/) from the same
+// origin as the API, so a single `node server.js` can host the whole app on
+// any machine/port. In development the Vite dev server is used instead, so
+// dist/ is absent and this is skipped.
+const DIST_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'dist');
+const HAS_DIST = existsSync(DIST_DIR);
+if (HAS_DIST) {
+  app.use(express.static(DIST_DIR));
+}
+
 // Multer Config for Asset Uploads
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -6605,6 +6615,17 @@ async function migrateWikiIfNeeded() {
   }
 }
 
+// SPA fallback: any GET that isn't an API/asset/media route and didn't match a
+// static file is a client-side (react-router) route — serve index.html so deep
+// links work on a full reload. Registered last so it never shadows real routes.
+if (HAS_DIST) {
+  app.use((req, res, next) => {
+    if (req.method !== 'GET') return next();
+    if (/^\/(api|assets|wiki-media)(\/|$)/.test(req.path)) return next();
+    res.sendFile(path.join(DIST_DIR, 'index.html'));
+  });
+}
+
 initializeStorage().then(async () => {
   try {
     await migrateWikiIfNeeded();
@@ -6626,5 +6647,10 @@ initializeStorage().then(async () => {
   app.listen(PORT, () => {
     console.log(`🚀 3D Gen Studio Backend running at http://localhost:${PORT}`);
     console.log(`📁 Local Workspace: ${DATA_DIR}`);
+    if (HAS_DIST) {
+      console.log(`🖥️  Serving bundled UI from dist/ — open http://localhost:${PORT}`);
+    } else {
+      console.log('ℹ️  No dist/ build found — run "npm run build" to serve the UI from this server.');
+    }
   });
 });
