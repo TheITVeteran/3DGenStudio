@@ -22,6 +22,15 @@ const PRESETS = [
 
 const CHANGE_LOG_ENTRIES = [
   {
+    version: 'v1.1.4',
+    date: '2026-06-28',
+    items: [
+			'Can navigate on different pages during a ComfyUI workflow execution',
+			'SetupWizard: Added Krea2 Turbo',
+			'Server can be configured on another machine/port'
+    ],
+  },
+  {
     version: 'v1.1.3',
     date: '2026-06-24',
     items: [
