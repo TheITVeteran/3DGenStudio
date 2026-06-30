@@ -5,6 +5,11 @@
 :: app feel extremely slow when launched from a .bat instead of a real terminal.
 start "3DGenStudio Dev" /min cmd /c "npm run dev > dev.log 2>&1"
 
+:: Start the Python mesh-tools service (Auto UV / Auto Retopo) the same way.
+:: Its run.bat creates a venv and installs deps on first launch, so the very
+:: first run can take a few minutes; output goes to python-server\python-server.log.
+start "3DGenStudio Python" /min cmd /c "cd /d "%~dp0python-server" && run.bat > python-server.log 2>&1"
+
 :: Wait a few seconds to let Vite + the backend spin up
 timeout /t 3 /nobreak >nul
 
