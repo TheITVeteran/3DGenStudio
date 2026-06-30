@@ -24,6 +24,11 @@ class RetopoConfig:
     feature_deg: float = 30.0         # crease angle preserved as a feature
     calibrate_passes: int = 1         # rough edge-length correction; decimation sets exact count
 
+    # --- hard-surface / architectural detail preservation ---
+    preserve_features: bool = False   # keep sharp creases crisp, don't smooth structural edges
+    feature_angle: float = 25.0       # crease angle (deg) treated as a hard edge when preserve_features
+    work_face_cap: int = 120000       # pre-decimate inputs larger than this so remeshing stays fast/robust
+
     # --- silhouette projection ("follow the original surface") ---
     project: bool = True
     project_iters: int = 10

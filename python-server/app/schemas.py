@@ -83,6 +83,12 @@ class AutoRetopoOptions(BaseModel):
     feature_deg: float = Field(default=30.0, ge=0.0, le=180.0, description="Crease angle preserved as a feature.")
     calibrate_passes: int = Field(default=1, ge=0, le=10, description="Rough edge-length correction passes.")
 
+    # --- hard-surface / architectural detail preservation ---
+    preserve_features: bool = Field(default=False,
+                                    description="Hard-surface mode: keep sharp creases crisp, skip smoothing/projection.")
+    feature_angle: float = Field(default=25.0, ge=0.0, le=180.0,
+                                 description="Crease angle (deg) treated as a hard edge when preserve_features is on.")
+
     # --- silhouette projection ---
     project: bool = Field(default=True, description="Project the remesh back onto the original surface.")
     project_iters: int = Field(default=10, ge=0, le=100, description="Projection iterations.")

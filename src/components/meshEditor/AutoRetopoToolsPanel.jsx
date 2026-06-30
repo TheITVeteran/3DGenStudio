@@ -100,20 +100,34 @@ export default function AutoRetopoToolsPanel({
       </div>
 
       <div className="mesh-editor-panel__section">
+        <span className="mesh-editor-panel__section-title">Feature preservation</span>
+        <ToggleField label="Preserve features" value={o.preserve_features}
+          onChange={v => setOption('preserve_features', v)} disabled={fieldsDisabled}
+          hint="Hard-surface mode: keep sharp creases crisp, skip smoothing/projection" />
+        <RangeField label="Feature angle" suffix="°" min={0} max={180} step={1}
+          value={o.feature_angle} onChange={v => setOption('feature_angle', v)}
+          disabled={fieldsDisabled || !o.preserve_features}
+          hint="Crease angle treated as a hard edge when preserve features is on" />
+      </div>
+
+      <div className="mesh-editor-panel__section">
         <span className="mesh-editor-panel__section-title">Silhouette projection</span>
+        {o.preserve_features && (
+          <span className="mesh-editor-panel__hint">Projection is skipped while Preserve features is on.</span>
+        )}
         <ToggleField label="Project to surface" value={o.project}
-          onChange={v => setOption('project', v)} disabled={fieldsDisabled}
+          onChange={v => setOption('project', v)} disabled={fieldsDisabled || o.preserve_features}
           hint="Project the remesh back onto the original surface" />
         <NumberField label="Projection iterations" min={0} max={100} step={1}
           value={o.project_iters} onChange={v => setOption('project_iters', v)}
-          disabled={fieldsDisabled || !o.project} />
+          disabled={fieldsDisabled || !o.project || o.preserve_features} />
         <RangeField label="Move clamp" min={0} max={10} step={0.1} decimals={1}
           value={o.project_clamp} onChange={v => setOption('project_clamp', v)}
-          disabled={fieldsDisabled || !o.project}
+          disabled={fieldsDisabled || !o.project || o.preserve_features}
           hint="Max per-vertex move as a multiple of local edge length" />
         <RangeField label="Relax strength" min={0} max={1} step={0.05} decimals={2}
           value={o.relax_strength} onChange={v => setOption('relax_strength', v)}
-          disabled={fieldsDisabled || !o.project}
+          disabled={fieldsDisabled || !o.project || o.preserve_features}
           hint="Tangential relaxation factor per iteration" />
       </div>
 

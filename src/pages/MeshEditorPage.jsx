@@ -181,6 +181,8 @@ const DEFAULT_AUTO_RETOPO_OPTIONS = {
   remesh_iters: 10,
   feature_deg: 30,
   calibrate_passes: 1,
+  preserve_features: false,
+  feature_angle: 25,
   project: true,
   project_iters: 10,
   project_clamp: 1.5,

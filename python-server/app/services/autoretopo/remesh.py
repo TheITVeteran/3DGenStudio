@@ -28,10 +28,17 @@ def _edge_len_for_faces(V, F, target_faces):
 
 
 def isotropic_remesh(V, F, target_faces, adaptive=True, iters=10,
-                     feature_deg=30.0, calibrate_passes=2, verbose=False):
+                     feature_deg=30.0, calibrate_passes=2, verbose=False,
+                     smoothflag=True, reproject=True, checksurfdist=False,
+                     maxsurfdist_pct=1.0):
     """Remesh to ~target_faces. Each calibration pass remeshes the *same source*
     with a corrected edge length (n ~ 1/L^2), and we keep the pass closest to the
-    budget so adaptive density can't make us drift."""
+    budget so adaptive density can't make us drift.
+
+    For hard-surface models, set a low `feature_deg` (crease edges below this angle
+    are kept sharp), `smoothflag=False` (don't round structural edges) and
+    `reproject=True` with `checksurfdist=True` (stay glued to the original surface).
+    """
     L = _edge_len_for_faces(V, F, target_faces)
     Vsrc, Fsrc = np.asarray(V, float), np.asarray(F, np.int64)
     best = None
@@ -41,7 +48,9 @@ def isotropic_remesh(V, F, target_faces, adaptive=True, iters=10,
         ms.meshing_isotropic_explicit_remeshing(
             iterations=int(iters), adaptive=bool(adaptive),
             targetlen=ml.PureValue(L), featuredeg=float(feature_deg),
-            checksurfdist=False)
+            smoothflag=bool(smoothflag), reprojectflag=bool(reproject),
+            checksurfdist=bool(checksurfdist),
+            maxsurfdist=ml.PercentageValue(float(maxsurfdist_pct)))
         mm = ms.current_mesh()
         Vc, Fc = np.asarray(mm.vertex_matrix()), np.asarray(mm.face_matrix())
         n = len(Fc)
@@ -57,6 +66,26 @@ def isotropic_remesh(V, F, target_faces, adaptive=True, iters=10,
         L *= np.sqrt(n / float(target_faces))   # bigger edges -> fewer faces
     _, Vb, Fb = best
     return np.ascontiguousarray(Vb), np.ascontiguousarray(Fb.astype(np.int64))
+
+
+def pre_decimate(V, F, target_faces, verbose=False):
+    """Fast, robust coarse decimation to make a huge input tractable for remeshing.
+
+    A cheap quadric pass (no quality weighting / planar quadric) collapses a
+    multi-hundred-k mesh to a working resolution in seconds, without the spikes that
+    aggressive options produce on non-manifold triangle soup. Used as a front-end for
+    large meshes; the real feature-aware work happens afterwards on the smaller mesh.
+    """
+    ms = ml.MeshSet()
+    ms.add_mesh(ml.Mesh(np.asarray(V, float), np.asarray(F, np.int64)))
+    ms.meshing_decimation_quadric_edge_collapse(
+        targetfacenum=int(target_faces), qualitythr=0.3,
+        preservenormal=True, optimalplacement=True, autoclean=True)
+    mm = ms.current_mesh()
+    if verbose:
+        print(f"    pre-decimate -> {mm.face_number()} faces")
+    return np.ascontiguousarray(mm.vertex_matrix()), \
+        np.ascontiguousarray(mm.face_matrix().astype(np.int64))
 
 
 def decimate_to_target(V, F, target_faces, preserve_boundary=True):

@@ -92,10 +92,18 @@ class AutoRetopo:
         # Stage 2: clean topology
         t0 = time.time()
         report("remesh", 0.38, "Building clean topology")
+        # Pre-decimate very large inputs so remeshing stays fast and robust (avoids
+        # quadric spikes on raw soup). Skipped for the watertight shell (already coarse).
+        if not cfg.watertight and len(F) > cfg.work_face_cap:
+            V, F = remesh.pre_decimate(V, F, cfg.work_face_cap, verbose=cfg.verbose)
+            self._log(f"[pre-decimate] {len(F)} faces")
+
+        feat = cfg.preserve_features
         V, F = remesh.isotropic_remesh(
             V, F, cfg.target_faces, adaptive=cfg.adaptive, iters=cfg.remesh_iters,
-            feature_deg=cfg.feature_deg, calibrate_passes=cfg.calibrate_passes,
-            verbose=cfg.verbose)
+            feature_deg=(cfg.feature_angle if feat else cfg.feature_deg),
+            calibrate_passes=cfg.calibrate_passes, verbose=cfg.verbose,
+            smoothflag=True, reproject=True, checksurfdist=feat, maxsurfdist_pct=1.0)
         # hit the budget exactly: decimate the (slightly over) adaptive result
         if len(F) > cfg.target_faces * 1.05:
             V, F = remesh.decimate_to_target(V, F, cfg.target_faces)
@@ -104,9 +112,12 @@ class AutoRetopo:
         self._log(f"[remesh] {len(F)} faces")
 
         # Stage 3: silhouette projection
+        # Feature mode relies on the remesher's own reprojection; an extra closest-point
+        # snap onto a noisy hard-surface mesh (stone texture, thin parts) hurts more than
+        # it helps, so it is skipped there.
         t0 = time.time()
         report("project", 0.72, "Projecting to surface")
-        if cfg.project:
+        if cfg.project and not cfg.preserve_features:
             V = project.project_to_surface(
                 V, F, original, iters=cfg.project_iters,
                 clamp=cfg.project_clamp, relax_strength=cfg.relax_strength)

@@ -25,6 +25,10 @@ def build_parser():
     p.add_argument("--no-watertight", action="store_true",
                    help="remesh the surface directly (keeps open boundaries)")
     p.add_argument("--no-adaptive", action="store_true", help="uniform density")
+    p.add_argument("--preserve-features", action="store_true",
+                   help="hard-surface mode: keep sharp creases crisp, skip smoothing/projection")
+    p.add_argument("--feature-angle", type=float, default=25.0,
+                   help="crease angle (deg) treated as a hard edge with --preserve-features")
     p.add_argument("--no-project", action="store_true", help="skip silhouette projection")
     p.add_argument("--clamp", type=float, default=1.5, help="projection move clamp (x edge length)")
     p.add_argument("--quads", action="store_true", help="convert to quad-dominant")
@@ -41,6 +45,7 @@ def main(argv=None):
         shell_smooth=args.shell_smooth, watertight=not args.no_watertight,
         adaptive=not args.no_adaptive, project=not args.no_project,
         project_clamp=args.clamp, quads=args.quads, max_memory_gb=args.max_memory,
+        preserve_features=args.preserve_features, feature_angle=args.feature_angle,
         verbose=not args.quiet)
 
     result = AutoRetopo(cfg).run(args.input)
