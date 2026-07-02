@@ -130,7 +130,7 @@ export default function ImageEditorPage() {
   const assetId = searchParams.get('assetId') || ''
   const filePath = searchParams.get('filePath') || ''
   const imageUrl = searchParams.get('url') || ''
-  const imageName = searchParams.get('name') || 'Image'
+  const [imageName, setImageName] = useState(searchParams.get('name') || 'Image')
   const projectId = searchParams.get('projectId') || ''
   const returnTo = searchParams.get('returnTo') || '/assets'
 
@@ -1380,7 +1380,7 @@ export default function ImageEditorPage() {
       const canvas = await exportCurrentComposite()
       if (!canvas) return
       const file = await canvasToPngFile(canvas, `${imageName || 'image'}-edit.png`)
-      await saveImageEditorFile(numericAssetId, file, `${imageName || 'Image'} Edit`, 'version')
+      await saveImageEditorFile(numericAssetId, file, imageName || 'Image', 'version')
       setFeedback('New version saved.')
     } catch (err) {
       setFeedback(`Save failed: ${err.message}`)
@@ -1828,6 +1828,7 @@ export default function ImageEditorPage() {
         <section className="image-editor-shell">
           <ImageEditorToolbar
             imageName={imageName}
+            onImageNameChange={setImageName}
             onBack={() => navigate(returnTo)}
             onUndo={undo}
             onRedo={redo}

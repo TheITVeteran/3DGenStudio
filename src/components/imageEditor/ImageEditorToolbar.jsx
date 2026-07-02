@@ -3,6 +3,7 @@
 
 export default function ImageEditorToolbar({
   imageName,
+  onImageNameChange,
   onBack,
   onUndo,
   onRedo,
@@ -28,7 +29,16 @@ export default function ImageEditorToolbar({
         </button>
         <div>
           <h1 className="image-editor-title font-headline">Image Editor</h1>
-          <p className="image-editor-subtitle">{imageName}</p>
+        </div>
+        <div className="image-editor-toolbar__name-field">
+          <label className="image-editor-toolbar__name-label">Image name</label>
+          <input
+            type="text"
+            className="image-editor-toolbar__name-input"
+            value={imageName}
+            onChange={event => onImageNameChange?.(event.target.value)}
+            placeholder="Image name"
+          />
         </div>
       </div>
 
