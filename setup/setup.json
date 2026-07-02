@@ -480,7 +480,58 @@
 					]
 				}
 			]
-		}
+		},
+		{
+			"Name": "Boogu-Image Turbo",
+			"Models": {
+				"Q8":   { "FileName": "Boogu-Turbo-V2_dit-Q8_0.gguf",   "Url": "https://huggingface.co/realrebelai/Boogu-Image-Turbo_GGUFs/resolve/main/Boogu-Turbo-V2_dit-Q8_0.gguf?download=true",   "Size": 11.6 },
+				"Q5":   { "FileName": "Boogu-Turbo-V2_dit-Q5_0.gguf", "Url": "https://huggingface.co/realrebelai/Boogu-Image-Turbo_GGUFs/resolve/main/Boogu-Turbo-V2_dit-Q5_0.gguf?download=true", "Size": 7.99  },
+				"Q4":   { "FileName": "Boogu-Turbo-V2_dit-Q4_0.gguf", "Url": "https://huggingface.co/realrebelai/Boogu-Image-Turbo_GGUFs/resolve/main/Boogu-Turbo-V2_dit-Q4_0.gguf?download=true", "Size": 6.78  }
+			},
+			"VAE":         { "FileName": "flux1_vae_bf16.safetensors",            "Url": "https://huggingface.co/Comfy-Org/Boogu-Image/resolve/main/vae/flux1_vae_bf16.safetensors?download=true",                          "Size": 0.2 },
+			"TextEncoder": { "FileName": "qwen3vl_8b_fp8_scaled.safetensors", "Url": "https://huggingface.co/Comfy-Org/Boogu-Image/resolve/main/text_encoders/qwen3vl_8b_fp8_scaled.safetensors?download=true",          "Size": 10.6 },
+			"Workflows": [
+				{
+					"Name": "Gen Image with Boogu Turbo",
+					"File": "setup/Gen Image with Boogu Turbo.json",
+					"Inputs": [
+						{ "Node": "23", "Input": "text",  "Name": "Prompt", "Type": "String" },
+						{ "Node": "3",  "Input": "seed",  "Name": "Seed",   "Type": "Number" },
+						{ "Node": "3",  "Input": "steps", "Name": "Steps",  "Type": "Number" },
+						{ "Node": "46",  "Input": "value", "Name": "Image Resolution",  "Type": "Number" }
+					],
+					"Outputs": [
+						{ "Node": "47", "Name": "Save Image", "Type": "Image" }
+					]
+				}
+			]
+		},
+		{
+			"Name": "Boogu-Image Edit Turbo",
+			"Models": {
+				"Q8":   { "FileName": "boogu-edit-dit-Q8_0.gguf",   "Url": "https://huggingface.co/realrebelai/Boogu-Image-Edit_GGUFs/resolve/main/boogu-edit-dit-Q8_0.gguf?download=true",   "Size": 11.6 },
+				"Q5":   { "FileName": "boogu-edit-dit-Q5_0.gguf", "Url": "https://huggingface.co/realrebelai/Boogu-Image-Edit_GGUFs/resolve/main/boogu-edit-dit-Q5_0.gguf?download=true", "Size": 8.04  },
+				"Q4":   { "FileName": "boogu-edit-dit-Q4_0.gguf", "Url": "https://huggingface.co/realrebelai/Boogu-Image-Edit_GGUFs/resolve/main/boogu-edit-dit-Q4_0.gguf?download=true", "Size": 6.84  }
+			},
+			"VAE":         { "FileName": "flux1_vae_bf16.safetensors",            "Url": "https://huggingface.co/Comfy-Org/Boogu-Image/resolve/main/vae/flux1_vae_bf16.safetensors?download=true",                          "Size": 0.2 },
+			"TextEncoder": { "FileName": "qwen3vl_8b_fp8_scaled.safetensors", "Url": "https://huggingface.co/Comfy-Org/Boogu-Image/resolve/main/text_encoders/qwen3vl_8b_fp8_scaled.safetensors?download=true",          "Size": 10.6 },
+			"Workflows": [
+				{
+					"Name": "Edit Image with Boogu Edit Turbo",
+					"File": "setup/Edit Image with Boogu Edit Turbo.json",
+					"Inputs": [
+						{ "Node": "51", "Input": "image",  "Name": "Source Image", "Type": "Image" },
+						{ "Node": "50", "Input": "prompt",  "Name": "Prompt", "Type": "String" },
+						{ "Node": "3",  "Input": "seed",  "Name": "Seed",   "Type": "Number" },
+						{ "Node": "3",  "Input": "steps", "Name": "Steps",  "Type": "Number" },
+						{ "Node": "56",  "Input": "value", "Name": "Image Resolution",  "Type": "Number" }
+					],
+					"Outputs": [
+						{ "Node": "57", "Name": "Save Image", "Type": "Image" }
+					]
+				}
+			]
+		}		
 	],
 	"OtherWorkflows":[
 		{
