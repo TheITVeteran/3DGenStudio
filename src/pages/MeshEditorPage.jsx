@@ -412,6 +412,9 @@ export default function MeshEditorPage() {
   const [optimizeRunning, setOptimizeRunning] = useState(false)
   const [optimizeResult, setOptimizeResult] = useState(null)
   const [optimizeProgress, setOptimizeProgress] = useState(null)
+  // Snapshot of the texturable-mesh state from just before a mesh tool ran, so
+  // "Revert" can restore the original texture/UVs alongside the geometry undo.
+  const preToolTexturableRef = useRef(null)
   const [booleanOperation, setBooleanOperation] = useState('out')
   const [booleanPlaceMode, setBooleanPlaceMode] = useState(false)
   const [booleanBrushSource, setBooleanBrushSource] = useState('asset')
@@ -3826,6 +3829,8 @@ export default function MeshEditorPage() {
       } else {
         nextTexturable = await buildTexturableFromGeometry(nextGeometry, blankTextureSize)
       }
+      // Remember the pre-op texturable so Revert can bring the texture back.
+      preToolTexturableRef.current = texturableMesh
       setTexturableMesh(nextTexturable)
       setTextureRevision(0)
       setPaintLayers([])
@@ -3909,6 +3914,14 @@ export default function MeshEditorPage() {
 
   const handleRevertMeshTool = useCallback((clearResult) => {
     handleModelingUndo()
+    // Restore the texture/UVs that were live before the tool ran. Changing the
+    // texturable-mesh identity also re-runs the display effects, so the textured
+    // preview refreshes immediately (previously it only updated after switching
+    // modes, since the geometry undo alone doesn't remount <TexturedMesh>).
+    if (preToolTexturableRef.current) {
+      setTexturableMesh(preToolTexturableRef.current)
+      preToolTexturableRef.current = null
+    }
     clearResult(null)
   }, [handleModelingUndo])
 
@@ -6165,7 +6178,7 @@ export default function MeshEditorPage() {
                       intensity={displayMode === 'sculpt' ? 0.7 : 0.6}
                       color={displayMode === 'sculpt' ? '#ffffff' : '#8ff5ff'}
                     />
-                    {(activeMenu === 'texturing' || activeMenu === 'painting' || activeMenu === 'projection') && texturableMesh?.root && displayTextureRef.current && (activeMenu !== 'texturing' || maskTextureRef.current) ? (
+                    {(activeMenu === 'texturing' || activeMenu === 'painting' || activeMenu === 'projection' || activeMenu === 'optimize') && texturableMesh?.root && displayTextureRef.current && (activeMenu !== 'texturing' || maskTextureRef.current) ? (
                       <TexturedMesh
                         key={textureRevision}
                         root={texturableMesh.root}
