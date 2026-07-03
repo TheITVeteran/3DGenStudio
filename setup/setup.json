@@ -637,6 +637,17 @@
 			"Outputs": [
 				{ "Node": "7", "Name": "Save Mesh", "Type": "Mesh" }
 			]
-		}		
+		},
+		{
+			"Name": "Segmentation with SAM3-1",
+			"File": "setup/Segmentation with SAM3-1.json",
+			"Inputs": [
+				{ "Node": "163", "Input": "image",  "Name": "Source Image", "Type": "Image" },
+				{ "Node": "164:78", "Input": "text",  "Name": "Prompt", "Type": "String" }
+			],
+			"Outputs": [
+				{ "Node": "175", "Name": "Save Images", "Type": "Image" }
+			]
+		}			
 	]
 }

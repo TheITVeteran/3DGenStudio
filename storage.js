@@ -433,7 +433,11 @@ function mapAssetRow(row) {
   const filename = toAssetUrlPath(row.filePath);
   const thumbnail = row.thumbnail ? toAssetUrlPath(row.thumbnail) : null;
 
-  if (row.cardId) {
+  // Only surface a Kanban card id here. A graph asset is linked to a node-card
+  // (kanbanColumnId IS NULL); exposing that id as metadata.cardId would make the
+  // processing-snapshot machinery target the node-card, which has no column and
+  // must not be renamed/repurposed. Graph assets keep their own stored cardId.
+  if (row.cardId && row.kanbanColumnId != null) {
     metadata.cardId = row.clientKey || String(row.cardId);
   }
 
