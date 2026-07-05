@@ -845,7 +845,11 @@ export default function KanbanPage() {
             }
           }))
 
-          if (['completed', 'error'].includes(payload?.status)) {
+          // Refresh only on the true terminal event: the ComfyUI monitor emits
+          // an intermediate `status: 'completed'` on execution_success, before
+          // the server has persisted outputs and cleared the processing card.
+          // The finalizer's `done` flag fires only after that work is finished.
+          if (payload?.done || payload?.status === 'error') {
             closeImageEditProgressSubscription(cardId)
 
             try {
@@ -2398,7 +2402,7 @@ export default function KanbanPage() {
                   ...currentState,
                   status: payload?.status === 'error'
                     ? 'error'
-                    : payload?.status === 'completed'
+                    : payload?.done
                       ? 'completed'
                       : 'processing',
                   source: payload?.source || currentState.source || 'ComfyUI',
