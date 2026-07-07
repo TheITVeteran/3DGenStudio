@@ -112,6 +112,7 @@ import {
   buildProjectionConfidenceMap,
   applyProjectionEdgeBleed,
   resolveProjectionLayersIntoImageData,
+  buildProjectionSurfacePositionMap,
   applySeamPostProcessing,
   fillHolesPostProcessing
 } from '../utils/meshProjection'
@@ -489,6 +490,11 @@ export default function MeshEditorPage() {
   // bake and reused so the final composite gutter dilation only fills empty gutters,
   // never bleeds a view's colour across a thin gutter onto a neighbouring island.
   const projectionUvOccupancyRef = useRef(null)
+  // Per-texel 3D world position of the UV layout (from buildProjectionSurfacePositionMap),
+  // cached for the projection session. Lets the keep-texture base feather seed only at
+  // genuine 3D silhouette edges instead of every UV-island boundary. Built lazily and
+  // keyed by mesh + texture size so the live (per-mask-paint) compose reuses it.
+  const projectionSurfacePositionsRef = useRef(null)
   const projectionFaceOwnershipRef = useRef(new Map())
   const projectionLayerDataRef = useRef(new Map())
   const projectionLayerCounterRef = useRef(0)
@@ -2575,6 +2581,25 @@ export default function MeshEditorPage() {
     return canvas
   }, [texturableMesh])
 
+  // Build-once-and-cache the mesh's per-texel 3D position map for the current texture
+  // size (see buildProjectionSurfacePositionMap). The keep-texture base feather uses it
+  // to seed only at real 3D silhouette edges instead of every UV-island boundary.
+  // Rasterizing the mesh is too slow to redo per live mask-paint compose, so the result
+  // is cached and only rebuilt when the mesh or texture size changes.
+  const getProjectionSurfacePositions = useCallback((width, height) => {
+    const mesh = texturableMesh
+    if (!mesh?.root || !width || !height) {
+      return null
+    }
+    const cached = projectionSurfacePositionsRef.current
+    if (cached && cached.mesh === mesh && cached.width === width && cached.height === height) {
+      return cached.data
+    }
+    const data = buildProjectionSurfacePositionMap(mesh, width, height)
+    projectionSurfacePositionsRef.current = data ? { mesh, width, height, data } : null
+    return data
+  }, [texturableMesh])
+
   // Recompose the projection stack from the CACHED per-layer bakes, applying each
   // layer's mask. The expensive GPU bake is never re-run here, so this is fast
   // enough to call live while painting a mask (gives realtime feedback on the mesh).
@@ -2634,7 +2659,8 @@ export default function MeshEditorPage() {
       layerSnapshots.push(snapshot)
     }
     const keepingBaseTexture = Boolean(baseSnapshot && baseSnapshot.width === texW && baseSnapshot.height === texH)
-    resolveProjectionLayersIntoImageData(composedImage.data, layerSnapshots, texW, texH, projectionViewGainsRef.current, projectionUvOccupancyRef.current, keepingBaseTexture)
+    const surfacePositions = keepingBaseTexture ? getProjectionSurfacePositions(texW, texH) : null
+    resolveProjectionLayersIntoImageData(composedImage.data, layerSnapshots, texW, texH, projectionViewGainsRef.current, projectionUvOccupancyRef.current, keepingBaseTexture, surfacePositions)
     context.putImageData(composedImage, 0, 0)
     projectionLayerSnapshotsRef.current = layerSnapshots
     // Flag the texture for re-upload WITHOUT bumping textureRevision: the live mask
@@ -2642,7 +2668,7 @@ export default function MeshEditorPage() {
     // mounted material's map IS this texture object, and frameloop="always" re-uploads
     // it from needsUpdate every frame, so the mesh updates with no clone per frame.
     updateCanvasTexture(displayTextureRef.current)
-  }, [texturableMesh])
+  }, [texturableMesh, getProjectionSurfacePositions])
 
   // Paint the pending brush dab (capsule [lastPoint3D → pendingPoint3D]) into the
   // layer's mask canvas — GPU 3D-gated (seam-safe), with a UV-stamp CPU fallback.
@@ -4272,6 +4298,7 @@ export default function MeshEditorPage() {
     projectionBaseTextureRef.current = null
     projectionCoverageRef.current = null
     projectionUvOccupancyRef.current = null
+    projectionSurfacePositionsRef.current = null
     projectionFaceOwnershipRef.current.clear()
     projectionLayerDataRef.current.clear()
     projectionLayerCounterRef.current = 0
@@ -4642,7 +4669,8 @@ export default function MeshEditorPage() {
       projectionViewGainsRef.current = viewGains
 
       const keepingBaseTexture = Boolean(baseSnapshot && baseSnapshot.width === texW && baseSnapshot.height === texH)
-      resolveProjectionLayersIntoImageData(composedData, layerSnapshots, texW, texH, viewGains, projectionUvOccupancyRef.current, keepingBaseTexture)
+      const surfacePositions = keepingBaseTexture ? getProjectionSurfacePositions(texW, texH) : null
+      resolveProjectionLayersIntoImageData(composedData, layerSnapshots, texW, texH, viewGains, projectionUvOccupancyRef.current, keepingBaseTexture, surfacePositions)
       textureContext.putImageData(composedImage, 0, 0)
       projectionLayerSnapshotsRef.current = layerSnapshots
       postProcBackupRef.current = null  // invalidate any prior post-proc backup on rebuild
@@ -4669,7 +4697,7 @@ export default function MeshEditorPage() {
         setProjectionRebuildProgress(0)
       }
     }
-  }, [texturableMesh])
+  }, [texturableMesh, getProjectionSurfacePositions])
 
   const projectionLayersForRebuild = useMemo(() => projectionLayers, [
     projectionLayers.map(layer => [

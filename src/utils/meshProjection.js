@@ -119,6 +119,189 @@ export function computeProjectionViewBorderDistance(coverageMask, uvOccupancyMas
   return dist
 }
 
+// Rasterize the textured mesh's UV triangles once → per texel: interpolated 3D
+// WORLD position, the local world-units-per-texel scale, and a "has position" flag.
+// This is the surface information that lets a caller tell a genuine 3D silhouette
+// border from a UV-atlas island border — two texels adjacent in the atlas but far
+// apart on the mesh. UNLIKE the owned-only rasterization inside applySeamPostProcessing,
+// this fills EVERY texel any triangle covers in UV, whether a projection covers it or
+// not, because view-border detection needs positions on BOTH sides of the coverage
+// edge (the uncovered neighbour must be locatable in 3D to test whether it is the same
+// surface). Depends only on the mesh geometry/UVs and the texture size — none of which
+// change while compositing — so callers should build it once per projection session and
+// cache it. Returns null if the mesh has no UV'd geometry.
+export function buildProjectionSurfacePositionMap(texturableMesh, width, height) {
+  const pixelCount = width * height
+  if (!texturableMesh?.root || !pixelCount) {
+    return null
+  }
+
+  const meshes = []
+  texturableMesh.root.traverse(obj => {
+    if (obj.isMesh && obj.geometry && obj.geometry.attributes?.uv) meshes.push(obj)
+  })
+  if (meshes.length === 0) {
+    return null
+  }
+
+  const posMap = new Float32Array(pixelCount * 3)
+  const texelSize = new Float32Array(pixelCount)
+  const hasPos = new Uint8Array(pixelCount)
+  const textureConfig = texturableMesh.textureConfig
+
+  const vA = new THREE.Vector3(), vB = new THREE.Vector3(), vC = new THREE.Vector3()
+  const eAB = new THREE.Vector3(), eAC = new THREE.Vector3(), cross = new THREE.Vector3()
+  const uvA = new THREE.Vector2(), uvB = new THREE.Vector2(), uvC = new THREE.Vector2()
+
+  let sizeSum = 0, sizeN = 0
+  for (let mi = 0; mi < meshes.length; mi++) {
+    const mesh = meshes[mi]
+    mesh.updateWorldMatrix(true, false)
+    const matrixWorld = mesh.matrixWorld
+    const geom = mesh.geometry
+    const posAttr = geom.attributes.position
+    const uvAttr = geom.attributes.uv
+    const indexAttr = geom.index
+    const triCount = indexAttr ? indexAttr.count / 3 : posAttr.count / 3
+
+    for (let t = 0; t < triCount; t++) {
+      const base = t * 3
+      const i0 = indexAttr ? indexAttr.getX(base) : base
+      const i1 = indexAttr ? indexAttr.getX(base + 1) : base + 1
+      const i2 = indexAttr ? indexAttr.getX(base + 2) : base + 2
+
+      vA.fromBufferAttribute(posAttr, i0).applyMatrix4(matrixWorld)
+      vB.fromBufferAttribute(posAttr, i1).applyMatrix4(matrixWorld)
+      vC.fromBufferAttribute(posAttr, i2).applyMatrix4(matrixWorld)
+
+      uvA.set(uvAttr.getX(i0), uvAttr.getY(i0))
+      uvB.set(uvAttr.getX(i1), uvAttr.getY(i1))
+      uvC.set(uvAttr.getX(i2), uvAttr.getY(i2))
+      const pA = mapUvToCanvasPoint(uvA, width, height, textureConfig)
+      const pB = mapUvToCanvasPoint(uvB, width, height, textureConfig)
+      const pC = mapUvToCanvasPoint(uvC, width, height, textureConfig)
+      const x0 = pA.x, y0 = pA.y, x1 = pB.x, y1 = pB.y, x2 = pC.x, y2 = pC.y
+
+      const denom = (y1 - y2) * (x0 - x2) + (x2 - x1) * (y0 - y2)
+      if (Math.abs(denom) < 1e-10) continue
+
+      // World-units per texel for this triangle = sqrt(3D area / UV-pixel area).
+      eAB.subVectors(vB, vA); eAC.subVectors(vC, vA)
+      const area3D = 0.5 * cross.crossVectors(eAB, eAC).length()
+      const areaPx = 0.5 * Math.abs((x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0))
+      const wpt = Math.sqrt(area3D / Math.max(areaPx, 1e-9))
+
+      const invDenom = 1 / denom
+      const minPx = Math.max(0, Math.floor(Math.min(x0, x1, x2)))
+      const maxPx = Math.min(width - 1, Math.ceil(Math.max(x0, x1, x2)))
+      const minPy = Math.max(0, Math.floor(Math.min(y0, y1, y2)))
+      const maxPy = Math.min(height - 1, Math.ceil(Math.max(y0, y1, y2)))
+      const baryEps = -1e-3
+
+      for (let py = minPy; py <= maxPy; py++) {
+        const rowBase = py * width
+        for (let px = minPx; px <= maxPx; px++) {
+          const idx = rowBase + px
+          if (hasPos[idx]) continue
+          const fx = px + 0.5, fy = py + 0.5
+          const wa = ((y1 - y2) * (fx - x2) + (x2 - x1) * (fy - y2)) * invDenom
+          const wb = ((y2 - y0) * (fx - x2) + (x0 - x2) * (fy - y2)) * invDenom
+          const wc = 1 - wa - wb
+          if (wa < baryEps || wb < baryEps || wc < baryEps) continue
+          const m = idx * 3
+          posMap[m]     = wa * vA.x + wb * vB.x + wc * vC.x
+          posMap[m + 1] = wa * vA.y + wb * vB.y + wc * vC.y
+          posMap[m + 2] = wa * vA.z + wb * vB.z + wc * vC.z
+          texelSize[idx] = wpt
+          hasPos[idx] = 1
+          sizeSum += wpt; sizeN++
+        }
+      }
+    }
+  }
+  if (sizeN === 0) {
+    return null
+  }
+  return { posMap, texelSize, hasPos, avgWpt: sizeSum / sizeN, width, height }
+}
+
+// Silhouette-aware sibling of computeProjectionViewBorderDistance. Same output — the
+// distance (in texels) inward through a layer's coverage from its VIEW border, -1 in
+// the interior — but it decides what a "view border" is from the 3D SURFACE instead of
+// UV occupancy. computeProjectionViewBorderDistance only asks "is the uncovered
+// neighbour inside the UV layout?", which cannot distinguish a real silhouette from a
+// packed UV-island boundary (two charts placed edge-to-edge with no gutter) and so
+// feathered the kept base texture in along UV seams. This asks "is the uncovered
+// neighbour on the SAME 3D surface?" using the rasterized world positions: a gutter
+// neighbour (no position) or a different-island neighbour (far in 3D) never seeds, so
+// the base feather lands ONLY on genuine silhouette / self-occlusion edges. `surfacePositions`
+// is the object returned by buildProjectionSurfacePositionMap.
+export function computeProjectionSurfaceBorderDistance(coverageMask, surfacePositions, width, height, maxRadius) {
+  const pixelCount = width * height
+  const dist = new Int32Array(pixelCount).fill(-1)
+  if (
+    !coverageMask || coverageMask.length !== pixelCount
+    || !surfacePositions || !width || !height
+  ) {
+    return dist
+  }
+  const { posMap, texelSize, hasPos } = surfacePositions
+  if (!posMap || !texelSize || !hasPos || hasPos.length !== pixelCount) {
+    return dist
+  }
+
+  // Two image-adjacent texels are on the same surface when their 3D positions are
+  // within a few texels' worth of world distance (matches applySeamPostProcessing).
+  const ADJ = 4
+  const onSurface = (a, b) => {
+    if (!hasPos[a] || !hasPos[b]) return false
+    const ma = a * 3, mb = b * 3
+    const dx = posMap[ma] - posMap[mb]
+    const dy = posMap[ma + 1] - posMap[mb + 1]
+    const dz = posMap[ma + 2] - posMap[mb + 2]
+    const lim = ADJ * Math.max(texelSize[a], texelSize[b])
+    return dx * dx + dy * dy + dz * dz <= lim * lim
+  }
+
+  const radius = Math.max(1, Math.floor(maxRadius))
+  let frontier = []
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const i = y * width + x
+      if (!coverageMask[i] || !hasPos[i]) {
+        continue
+      }
+      // View border = an uncovered 4-neighbour that lies on the SAME 3D surface.
+      const left  = x > 0          && !coverageMask[i - 1]     && onSurface(i, i - 1)
+      const right = x < width - 1  && !coverageMask[i + 1]     && onSurface(i, i + 1)
+      const up    = y > 0          && !coverageMask[i - width] && onSurface(i, i - width)
+      const down  = y < height - 1 && !coverageMask[i + width] && onSurface(i, i + width)
+      if (left || right || up || down) {
+        dist[i] = 0
+        frontier.push(i)
+      }
+    }
+  }
+
+  // Grow inward through the layer's own coverage, but only across on-surface edges so
+  // the feather distance never jumps a UV seam into a co-packed island's interior.
+  for (let d = 0; d < radius && frontier.length > 0; d += 1) {
+    const next = []
+    for (let k = 0; k < frontier.length; k += 1) {
+      const i = frontier[k]
+      const x = i % width
+      const y = (i / width) | 0
+      if (x > 0)          { const n = i - 1;     if (coverageMask[n] && dist[n] < 0 && onSurface(i, n)) { dist[n] = d + 1; next.push(n) } }
+      if (x < width - 1)  { const n = i + 1;     if (coverageMask[n] && dist[n] < 0 && onSurface(i, n)) { dist[n] = d + 1; next.push(n) } }
+      if (y > 0)          { const n = i - width; if (coverageMask[n] && dist[n] < 0 && onSurface(i, n)) { dist[n] = d + 1; next.push(n) } }
+      if (y < height - 1) { const n = i + width; if (coverageMask[n] && dist[n] < 0 && onSurface(i, n)) { dist[n] = d + 1; next.push(n) } }
+    }
+    frontier = next
+  }
+
+  return dist
+}
+
 export function buildProjectionOverlapWeights(previousCoverage, previousSharedCoverage, layerCoverage, layerSharedMask, width, height, blendPixels = 0) {
   const pixelCount = width * height
   if (
@@ -629,10 +812,17 @@ export function dilateProjectionGutter(outputData, coverage, width, height, radi
 // texture everywhere, so a layer must NOT hard-overwrite the base at its true VIEW
 // border (its screen-space silhouette / self-occlusion edge) — it feathers across
 // `blendPixels` there into the base. The feather is seeded from the view border
-// only, NOT from UV-island edges (see computeProjectionViewBorderDistance), so it
-// does not paint the base over every UV seam. With a fresh checkerboard base this
-// stays off: the layer fully fills its footprint so the checker never bleeds in.
-export function resolveProjectionLayersIntoImageData(outputData, layerSnapshots, width, height, viewGains = null, uvOccupancyMask = null, blendWithBase = false) {
+// only, NOT from UV-island edges, so it does not paint the base over every UV seam.
+// With a fresh checkerboard base this stays off: the layer fully fills its footprint
+// so the checker never bleeds in.
+//
+// `surfacePositions` (from buildProjectionSurfacePositionMap) is preferred for that
+// view-border detection: it uses the mesh's 3D positions to seed the base feather ONLY
+// at genuine silhouette edges (computeProjectionSurfaceBorderDistance), which the
+// UV-occupancy fallback (computeProjectionViewBorderDistance) cannot do — the latter
+// treats a packed UV-island boundary as a view border and so feathers the base across
+// UV seams. When no mesh/position map is available it falls back to `uvOccupancyMask`.
+export function resolveProjectionLayersIntoImageData(outputData, layerSnapshots, width, height, viewGains = null, uvOccupancyMask = null, blendWithBase = false, surfacePositions = null) {
   if (!outputData || !Array.isArray(layerSnapshots) || layerSnapshots.length === 0 || !width || !height) {
     return
   }
@@ -686,9 +876,17 @@ export function resolveProjectionLayersIntoImageData(outputData, layerSnapshots,
     // inward through its coverage — 0 at the border, growing inward, -1 in the
     // interior / on UV-chart edges. Used only when keeping the original texture, to
     // feather the projection into the base at the view border WITHOUT touching UV
-    // seams. Requires the UV occupancy mask to tell view borders from chart edges.
-    const viewBorderDist = (blendWithBase && blendPx > 0 && uvOccupancyMask)
-      ? computeProjectionViewBorderDistance(layer.coverageMask, uvOccupancyMask, width, height, blendPx)
+    // seams. Prefers the mesh's 3D positions (surfacePositions) to locate genuine
+    // silhouette edges; falls back to the UV occupancy mask when no mesh is available.
+    const viewBorderDist = (blendWithBase && blendPx > 0)
+      ? (surfacePositions
+          // Preferred: seed the base feather only at true 3D silhouette edges.
+          ? computeProjectionSurfaceBorderDistance(layer.coverageMask, surfacePositions, width, height, blendPx)
+          // Fallback (no mesh available): UV-occupancy border — rejects gutters but
+          // not packed UV-island boundaries, so it can feather the base across UV seams.
+          : (uvOccupancyMask
+              ? computeProjectionViewBorderDistance(layer.coverageMask, uvOccupancyMask, width, height, blendPx)
+              : null))
       : null
 
     for (let i = 0; i < pixelCount; i += 1) {
