@@ -24,6 +24,15 @@ const PRESETS = [
 
 const CHANGE_LOG_ENTRIES = [
   {
+    version: 'v1.3.1',
+    date: '2026-07-07',
+    items: [
+			'Fixed slowness when queuing multiple ComfyUI workflows',
+			'SetupWizard: Added Gen Mesh with Hy2.0',
+			'MeshEditor - Projection: Fixed Blend overlap seams with original texture'
+    ],
+  },
+  {
     version: 'v1.3.0',
     date: '2026-07-04',
     items: [
