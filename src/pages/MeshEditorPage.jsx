@@ -20,6 +20,7 @@ import {
   geometryFaceCount,
   getClosestVertexIndex,
   getGeometryHoleLoops,
+  getGeometryWatertight,
   getSelectedHoleLoops,
   loadEditableGeometryFromObject,
   loadEditableGeometryFromGlbBuffer,
@@ -410,6 +411,9 @@ export default function MeshEditorPage() {
   const [autoRetopoResult, setAutoRetopoResult] = useState(null)
   const [autoUvProgress, setAutoUvProgress] = useState(null)
   const [autoRetopoProgress, setAutoRetopoProgress] = useState(null)
+  // Watertight check (Auto Retopo panel) — runs on demand via a button.
+  const [watertightChecking, setWatertightChecking] = useState(false)
+  const [watertightResult, setWatertightResult] = useState(null)
   const [optimizeOptions, setOptimizeOptions] = useState(DEFAULT_OPTIMIZE_OPTIONS)
   const [optimizeRunning, setOptimizeRunning] = useState(false)
   const [optimizeResult, setOptimizeResult] = useState(null)
@@ -3937,6 +3941,34 @@ export default function MeshEditorPage() {
   const setAutoRetopoOption = useCallback((key, value) => {
     setAutoRetopoOptions(prev => ({ ...prev, [key]: value }))
   }, [])
+
+  // On-demand watertight check for the Auto Retopo panel. The position-welded
+  // edge scan can take a moment on dense meshes, so it runs behind a button with
+  // a loading state rather than automatically. A double rAF lets the spinner
+  // paint before the synchronous scan blocks the main thread.
+  const handleCheckWatertight = useCallback(() => {
+    if (!geometry || watertightChecking) return
+    setWatertightChecking(true)
+    setWatertightResult(null)
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        try {
+          setWatertightResult(getGeometryWatertight(geometry))
+        } catch (err) {
+          console.error('Watertight check failed:', err)
+          setWatertightResult(null)
+        } finally {
+          setWatertightChecking(false)
+        }
+      })
+    })
+  }, [geometry, watertightChecking])
+
+  // Any geometry change (edits, Auto Retopo, revert…) invalidates a prior result,
+  // so clear it and let the user re-check against the new topology.
+  useEffect(() => {
+    setWatertightResult(null)
+  }, [geometryRevision])
   const setOptimizeOption = useCallback((key, value) => {
     setOptimizeOptions(prev => ({ ...prev, [key]: value }))
   }, [])
@@ -6065,6 +6097,9 @@ export default function MeshEditorPage() {
                   <AutoRetopoToolsPanel {...{
                     options: autoRetopoOptions, setOption: setAutoRetopoOption,
                     running: autoRetopoRunning, result: autoRetopoResult, progress: autoRetopoProgress,
+                    watertight: watertightResult,
+                    watertightChecking,
+                    onCheckWatertight: handleCheckWatertight,
                     onRun: handleRunAutoRetopo,
                     onKeepResult: () => setAutoRetopoResult(null),
                     onRevertResult: () => handleRevertMeshTool(setAutoRetopoResult),

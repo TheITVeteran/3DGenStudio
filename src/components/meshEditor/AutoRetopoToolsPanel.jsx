@@ -11,6 +11,9 @@ export default function AutoRetopoToolsPanel({
   running,
   result,
   progress,
+  watertight,
+  watertightChecking,
+  onCheckWatertight,
   onRun,
   onKeepResult,
   onRevertResult,
@@ -19,10 +22,45 @@ export default function AutoRetopoToolsPanel({
   const o = options
   const fieldsDisabled = disabled || running
 
+  const watertightLabel = () => {
+    if (watertight.watertight) return 'Mesh is already watertight — no need to build a shell.'
+    const parts = []
+    if (watertight.boundaryEdges > 0) parts.push(`${watertight.boundaryEdges} open edge${watertight.boundaryEdges === 1 ? '' : 's'}`)
+    if (watertight.nonManifoldEdges > 0) parts.push(`${watertight.nonManifoldEdges} non-manifold edge${watertight.nonManifoldEdges === 1 ? '' : 's'}`)
+    return parts.length ? `Mesh is not watertight (${parts.join(', ')}).` : 'Mesh is not watertight.'
+  }
+
   return (
     <>{/* AUTO RETOPO */}
       <div className="mesh-editor-panel__section">
         <span className="mesh-editor-panel__section-title">Auto Retopo</span>
+
+        <button
+          type="button"
+          className="mesh-editor-btn"
+          onClick={onCheckWatertight}
+          disabled={disabled || running || watertightChecking}
+          title="Analyze the current mesh topology for open or non-manifold edges"
+        >
+          <span className="material-symbols-outlined">{watertightChecking ? 'progress_activity' : 'water_drop'}</span>
+          <span>{watertightChecking ? 'Checking…' : 'Check if Watertight'}</span>
+        </button>
+
+        {watertight && !watertightChecking && (
+          <div
+            className="mesh-editor-panel__hint"
+            style={{ display: 'flex', alignItems: 'center', gap: '0.4em' }}
+          >
+            <span
+              className="material-symbols-outlined"
+              style={{ fontSize: '1.1em', color: watertight.watertight ? '#4caf50' : '#e0a030' }}
+            >
+              {watertight.watertight ? 'check_circle' : 'warning'}
+            </span>
+            <span>{watertightLabel()}</span>
+          </div>
+        )}
+
         <button
           type="button"
           className="mesh-editor-btn mesh-editor-btn--primary"
@@ -59,6 +97,9 @@ export default function AutoRetopoToolsPanel({
 
       <div className="mesh-editor-panel__section">
         <span className="mesh-editor-panel__section-title">Watertight shell</span>
+        {watertight?.watertight && o.watertight && (
+          <span className="mesh-editor-panel__hint">The mesh is already watertight; you can turn this off to remesh the surface directly and stay closer to the original.</span>
+        )}
         <ToggleField label="Watertight shell" value={o.watertight}
           onChange={v => setOption('watertight', v)} disabled={fieldsDisabled}
           hint="Build a unified voxel shell (robust) vs. remesh the surface directly" />
