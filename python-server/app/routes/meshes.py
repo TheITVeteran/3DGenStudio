@@ -29,9 +29,10 @@ from pydantic import ValidationError
 
 from ..config import MAX_UPLOAD_BYTES
 from ..meshio import export_mesh, load_mesh, mesh_stats
-from ..schemas import AutoRetopoOptions, AutoUvOptions
+from ..schemas import AutoRetopoOptions, AutoUvOptions, RepairOptions
 from ..services.auto_retopo import run_auto_retopo
 from ..services.auto_uv import run_auto_uv
+from ..services.repair import run_repair
 
 router = APIRouter(prefix="/meshes", tags=["meshes"])
 
@@ -145,3 +146,15 @@ async def auto_retopo(
     data = await _read_upload(meshFile)
     mesh = load_mesh(data, meshFile.filename or "mesh.glb")
     return _stream_tool(lambda emit: run_auto_retopo(mesh, opts, progress=emit), format, "Auto Retopo")
+
+
+@router.post("/repair")
+async def repair(
+    meshFile: UploadFile = File(...),
+    options: str | None = Form(None),
+    format: str = Form("glb"),
+) -> StreamingResponse:
+    opts = _parse_options(options, RepairOptions)
+    data = await _read_upload(meshFile)
+    mesh = load_mesh(data, meshFile.filename or "mesh.glb")
+    return _stream_tool(lambda emit: run_repair(mesh, opts, progress=emit), format, "Repair")

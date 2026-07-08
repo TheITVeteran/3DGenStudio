@@ -149,7 +149,7 @@ import PaintingToolsPanel from '../components/meshEditor/PaintingToolsPanel'
 import AutoUvToolsPanel from '../components/meshEditor/AutoUvToolsPanel'
 import AutoRetopoToolsPanel from '../components/meshEditor/AutoRetopoToolsPanel'
 import OptimizeToolsPanel from '../components/meshEditor/OptimizeToolsPanel'
-import { autoUv as runAutoUvService, autoRetopo as runAutoRetopoService, optimizeMesh as runOptimizeService } from '../utils/meshTools'
+import { autoUv as runAutoUvService, autoRetopo as runAutoRetopoService, optimizeMesh as runOptimizeService, repairMesh as runRepairService } from '../utils/meshTools'
 
 // Default option sets for the Python mesh-tools panels. These mirror the
 // defaults of autouv.unwrap() and autoretopo.RetopoConfig 1:1 (see
@@ -193,6 +193,14 @@ const DEFAULT_AUTO_RETOPO_OPTIONS = {
   relax_strength: 0.4,
   device: 'auto',
   seed: 0,
+}
+
+// Non-manifold / topology repair (see python-server/app/schemas.py RepairOptions).
+const DEFAULT_REPAIR_OPTIONS = {
+  method: 'remove',
+  close_holes: true,
+  max_hole_size: 30,
+  weld: true,
 }
 
 const DEFAULT_OPTIMIZE_OPTIONS = {
@@ -415,6 +423,11 @@ export default function MeshEditorPage() {
   // Watertight check (Auto Retopo panel) — runs on demand via a button.
   const [watertightChecking, setWatertightChecking] = useState(false)
   const [watertightResult, setWatertightResult] = useState(null)
+  // Non-manifold / topology repair (Auto Retopo panel) — Python mesh-tools service.
+  const [repairOptions, setRepairOptions] = useState(DEFAULT_REPAIR_OPTIONS)
+  const [repairRunning, setRepairRunning] = useState(false)
+  const [repairResult, setRepairResult] = useState(null)
+  const [repairProgress, setRepairProgress] = useState(null)
   const [optimizeOptions, setOptimizeOptions] = useState(DEFAULT_OPTIMIZE_OPTIONS)
   const [optimizeRunning, setOptimizeRunning] = useState(false)
   const [optimizeResult, setOptimizeResult] = useState(null)
@@ -3816,7 +3829,7 @@ export default function MeshEditorPage() {
   // After applying, the texturable-mesh state is rebuilt so the new UVs (Auto
   // UV) immediately enable painting/texturing/projection.
   const runMeshTool = useCallback(async (service, options, { setRunning, setResult, setProgress, buildRows, label, preserveTexture = false }) => {
-    if (!geometry || autoUvRunning || autoRetopoRunning || optimizeRunning) {
+    if (!geometry || autoUvRunning || autoRetopoRunning || optimizeRunning || repairRunning) {
       return
     }
     setRunning(true)
@@ -3876,7 +3889,7 @@ export default function MeshEditorPage() {
       setRunning(false)
       setProgress(null)
     }
-  }, [geometry, autoUvRunning, autoRetopoRunning, optimizeRunning, applyGeometryUpdate, buildTexturableFromGeometry, blankTextureSize, texturableMesh, modelUrl])
+  }, [geometry, autoUvRunning, autoRetopoRunning, optimizeRunning, repairRunning, applyGeometryUpdate, buildTexturableFromGeometry, blankTextureSize, texturableMesh, modelUrl])
 
   const handleRunAutoUv = useCallback(() => {
     runMeshTool(runAutoUvService, autoUvOptions, {
@@ -3964,6 +3977,38 @@ export default function MeshEditorPage() {
       })
     })
   }, [geometry, watertightChecking])
+
+  const setRepairOption = useCallback((key, value) => {
+    setRepairOptions(prev => ({ ...prev, [key]: value }))
+  }, [])
+
+  // Targeted non-manifold / topology repair via the Python mesh-tools service:
+  // weld → drop duplicate/degenerate faces → resolve non-manifold edges → close
+  // small holes. Runs the same round-trip as Auto Retopo (undoable via Keep/
+  // Revert) and reports before/after non-manifold + boundary edge counts.
+  const handleCleanNonManifold = useCallback(() => {
+    runMeshTool(runRepairService, repairOptions, {
+      setRunning: setRepairRunning,
+      setResult: setRepairResult,
+      setProgress: setRepairProgress,
+      label: 'Repair',
+      buildRows: stats => {
+        const t = stats?.tool || {}
+        const before = t.before || {}
+        const after = t.after || {}
+        const rows = []
+        if (before.non_manifold_edges != null && after.non_manifold_edges != null) {
+          rows.push({ label: 'Non-manifold edges', value: `${before.non_manifold_edges} → ${after.non_manifold_edges}` })
+        }
+        if (before.boundary_edges != null && after.boundary_edges != null) {
+          rows.push({ label: 'Open edges', value: `${before.boundary_edges} → ${after.boundary_edges}` })
+        }
+        if (t.removed_faces != null) rows.push({ label: 'Faces removed', value: t.removed_faces })
+        if (after.watertight != null) rows.push({ label: 'Watertight', value: after.watertight ? 'Yes' : 'No' })
+        return rows
+      },
+    })
+  }, [runMeshTool, repairOptions])
 
   // Any geometry change (edits, Auto Retopo, revert…) invalidates a prior result,
   // so clear it and let the user re-check against the new topology.
@@ -6101,6 +6146,11 @@ export default function MeshEditorPage() {
                     watertight: watertightResult,
                     watertightChecking,
                     onCheckWatertight: handleCheckWatertight,
+                    onCleanNonManifold: handleCleanNonManifold,
+                    repairOptions, setRepairOption,
+                    repairRunning, repairResult, repairProgress,
+                    onKeepRepairResult: () => setRepairResult(null),
+                    onRevertRepairResult: () => handleRevertMeshTool(setRepairResult),
                     onRun: handleRunAutoRetopo,
                     onKeepResult: () => setAutoRetopoResult(null),
                     onRevertResult: () => handleRevertMeshTool(setAutoRetopoResult),

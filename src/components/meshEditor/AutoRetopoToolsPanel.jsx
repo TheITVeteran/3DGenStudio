@@ -14,6 +14,14 @@ export default function AutoRetopoToolsPanel({
   watertight,
   watertightChecking,
   onCheckWatertight,
+  onCleanNonManifold,
+  repairOptions,
+  setRepairOption,
+  repairRunning,
+  repairResult,
+  repairProgress,
+  onKeepRepairResult,
+  onRevertRepairResult,
   onRun,
   onKeepResult,
   onRevertResult,
@@ -59,6 +67,51 @@ export default function AutoRetopoToolsPanel({
             </span>
             <span>{watertightLabel()}</span>
           </div>
+        )}
+
+        {watertight && !watertightChecking && !watertight.watertight && watertight.nonManifoldEdges > 0 && (
+          <>
+            <button
+              type="button"
+              className="mesh-editor-btn"
+              onClick={onCleanNonManifold}
+              disabled={disabled || running || repairRunning}
+              title="Resolve non-manifold edges directly (weld, drop duplicate faces, remove/split the offending faces, close small holes) without a full retopo"
+            >
+              <span className="material-symbols-outlined">{repairRunning ? 'progress_activity' : 'cleaning_services'}</span>
+              <span>{repairRunning ? 'Repairing…' : 'Clean Non-Manifold Edges'}</span>
+            </button>
+            {repairOptions && (
+              <>
+                <SelectField label="Repair method" value={repairOptions.method}
+                  onChange={v => setRepairOption('method', v)} disabled={fieldsDisabled || repairRunning}
+                  options={[
+                    { value: 'remove', label: 'Remove faces (then close holes)' },
+                    { value: 'split', label: 'Split vertices (keep faces)' },
+                  ]}
+                  hint="Remove deletes the offending faces; Split detaches the sheets and leaves open edges" />
+                <ToggleField label="Close resulting holes" value={repairOptions.close_holes}
+                  onChange={v => setRepairOption('close_holes', v)} disabled={fieldsDisabled || repairRunning}
+                  hint="Seal the small holes that face removal opens (uncheck to leave them and guarantee no new non-manifold edges)" />
+                <NumberField label="Max hole size" min={0} max={5000} step={1}
+                  value={repairOptions.max_hole_size} onChange={v => setRepairOption('max_hole_size', v)}
+                  disabled={fieldsDisabled || repairRunning || !repairOptions.close_holes}
+                  hint="Largest hole (in edges) to close; bigger openings are left intact" />
+              </>
+            )}
+          </>
+        )}
+
+        {repairRunning && <MeshToolProgress progress={repairProgress} />}
+
+        {repairResult && (
+          <MeshToolResult
+            title="Repair applied"
+            rows={repairResult.rows}
+            onKeep={onKeepRepairResult}
+            onRevert={onRevertRepairResult}
+            disabled={repairRunning}
+          />
         )}
 
         <button

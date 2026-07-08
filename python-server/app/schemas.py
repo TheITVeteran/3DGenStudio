@@ -110,6 +110,28 @@ class AutoRetopoOptions(BaseModel):
     seed: int = Field(default=0, ge=0, description="RNG seed for reproducibility.")
 
 
+class RepairOptions(BaseModel):
+    """Options for the non-manifold / topology repair endpoint.
+
+    Targeted cleanup that resolves non-manifold edges without a full retopo:
+    weld coincident verts, drop duplicate/degenerate faces, then either remove
+    the offending faces or split the sheets apart, optionally sealing the small
+    holes that face removal opens.
+    """
+
+    method: Literal["remove", "split"] = Field(
+        default="remove",
+        description="How to resolve non-manifold edges. 'remove' deletes the "
+                    "offending faces (small holes can then be closed); 'split' "
+                    "detaches the sheets, keeping all faces but leaving boundary edges.")
+    close_holes: bool = Field(default=True,
+                              description="Close the small holes that face removal opens (also runs a trimesh fill pass).")
+    max_hole_size: int = Field(default=30, ge=0, le=5000,
+                               description="Largest hole (in boundary edges) to close; bigger openings are left intact.")
+    weld: bool = Field(default=True,
+                       description="Weld coincident vertices by position before repairing (matches the editor's check).")
+
+
 class MeshStats(BaseModel):
     """Reported back to the caller (also surfaced via response headers)."""
 

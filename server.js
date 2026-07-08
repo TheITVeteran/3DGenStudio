@@ -5795,6 +5795,15 @@ app.post('/api/meshes/auto-retopo', meshToolsUpload.single('meshFile'), async (r
   }
 });
 
+app.post('/api/meshes/repair', meshToolsUpload.single('meshFile'), async (req, res) => {
+  try {
+    await proxyMeshTool('/meshes/repair', req, res);
+  } catch (err) {
+    console.error('Repair proxy failed:', err);
+    if (!res.headersSent) res.status(500).json({ error: err.message || 'Repair failed' });
+  }
+});
+
 // --- Mesh optimize (meshoptimizer / gltfpack binary) ------------------------
 // Unlike Auto UV / Auto Retopo (which proxy to the Python service), this runs
 // the bundled `gltfpack` binary locally. The browser uploads a GLB; we write it

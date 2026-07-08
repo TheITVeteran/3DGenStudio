@@ -958,16 +958,13 @@ export function geometryFaceCount(geometry) {
 // vertices along normal/UV seams, which would report false boundaries. So we
 // re-weld by quantized position only, independent of the index attribute, to
 // match how the Python service (trimesh) evaluates topology.
-export function getGeometryWatertight(geometry) {
-  if (!geometry?.index?.count || !geometry.attributes?.position) {
-    return null
-  }
-
+// Weld vertices by quantized position onto a mesh-scaled grid so coincident
+// vertices collapse to one canonical id regardless of float noise or the
+// normal/UV seams that split the editable index. Returns a per-vertex id array
+// indexed like geometry.attributes.position. Shared by the watertight check and
+// the non-manifold cleaner so both agree on which corners are the "same point".
+function buildCanonicalVertexIds(geometry) {
   const positions = geometry.attributes.position.array
-  const indices = geometry.index.array
-
-  // Quantize positions onto a grid scaled to the mesh so coincident vertices
-  // collapse to one id regardless of float noise or attribute-driven splits.
   geometry.computeBoundingBox()
   const box = geometry.boundingBox
   const diag = box
@@ -977,8 +974,9 @@ export function getGeometryWatertight(geometry) {
   const invTol = 1 / tol
 
   const canonicalByKey = new Map()
-  const canonicalOfVertex = new Int32Array(positions.length / 3)
-  for (let v = 0; v < positions.length / 3; v += 1) {
+  const vertexCount = positions.length / 3
+  const canonicalOfVertex = new Int32Array(vertexCount)
+  for (let v = 0; v < vertexCount; v += 1) {
     const kx = Math.round(positions[v * 3] * invTol)
     const ky = Math.round(positions[v * 3 + 1] * invTol)
     const kz = Math.round(positions[v * 3 + 2] * invTol)
@@ -990,6 +988,16 @@ export function getGeometryWatertight(geometry) {
     }
     canonicalOfVertex[v] = id
   }
+  return canonicalOfVertex
+}
+
+export function getGeometryWatertight(geometry) {
+  if (!geometry?.index?.count || !geometry.attributes?.position) {
+    return null
+  }
+
+  const indices = geometry.index.array
+  const canonicalOfVertex = buildCanonicalVertexIds(geometry)
 
   const edgeCounts = new Map()
   const faceCount = indices.length / 3
