@@ -2037,9 +2037,27 @@ async function getHitem3dAccessToken(settings, { forceRefresh = false } = {}) {
   return accessToken;
 }
 
+// Detects whether a Hitem3D response indicates the access token is bad/expired,
+// so the caller can mint a fresh token and retry. Hitem wraps most responses in
+// HTTP 200 with a body `code`/`msg`, so besides HTTP 401/403 and body code
+// 401/403 we also match token/auth-related messages (e.g. "invalid token",
+// "token expired", "unauthorized").
 function isHitemAuthError(response, responseBody) {
   const code = Number(responseBody?.code);
-  return response?.status === 401 || response?.status === 403 || code === 401 || code === 403;
+  if (response?.status === 401 || response?.status === 403 || code === 401 || code === 403) {
+    return true;
+  }
+
+  const message = String(responseBody?.msg || responseBody?.message || '').toLowerCase();
+  if (!message) {
+    return false;
+  }
+
+  return message.includes('token')
+    || message.includes('unauthorized')
+    || message.includes('unauthenticated')
+    || message.includes('invalid credential')
+    || message.includes('expired');
 }
 
 function normalizeHitemMeshGenerationInput({
