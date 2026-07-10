@@ -72,6 +72,10 @@ mac:
   gatekeeperAssess: false
 
 linux:
+  # A .deb package REQUIRES a maintainer (name + email) — without it the fpm
+  # target fails. Change this to your preferred contact.
+  maintainer: Bruno Fargnoli <info@3dgenstudio.com>
+  synopsis: AI-powered 3D mesh production studio
   # TODO: add build/icon.png (512x512) for a branded icon.
   category: Graphics
   target:
