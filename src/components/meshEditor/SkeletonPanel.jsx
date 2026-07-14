@@ -6,6 +6,8 @@
 // (which highlights it on the mesh via SkeletonOverlay), and clicking a bone on
 // the mesh selects the matching row here and scrolls it into view.
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { ANIMATION_REFERENCES, animationPreviewUrl } from '../../utils/animationLibrary'
+import AnimationClipItem from './AnimationClipItem'
 
 // Build a children-index map + root list from the flat `parents` array.
 function buildHierarchy(parents) {
@@ -82,7 +84,7 @@ function BoneNode({ index, depth, names, childMap, selectedBone, onSelectBone, c
   )
 }
 
-export default function SkeletonPanel({ skeleton, selectedBone, onSelectBone }) {
+export default function SkeletonPanel({ skeleton, selectedBone, onSelectBone, animation }) {
   const [tab, setTab] = useState('skeleton')
   const [collapsed, setCollapsed] = useState(() => new Set())
   const rowRefs = useRef(new Map())
@@ -178,9 +180,85 @@ export default function SkeletonPanel({ skeleton, selectedBone, onSelectBone }) 
         </div>
       ) : (
         <div className="mesh-editor-skeleton-panel__body">
-          <div className="mesh-editor-layers-panel__empty">
-            Animations coming soon.
+          <div className="mesh-editor-anim__controls">
+            <label className="mesh-editor-anim__field">
+              <span className="mesh-editor-panel__hint">Reference mesh</span>
+              <select
+                className="mesh-editor-panel__input mesh-editor-panel__select"
+                value={animation?.referenceId || ''}
+                onChange={e => animation?.onSelectReference(e.target.value)}
+                disabled={animation?.loading}
+              >
+                <option value="" disabled>Select a reference…</option>
+                {ANIMATION_REFERENCES.map(ref => (
+                  <option key={ref.id} value={ref.id}>{ref.label}</option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              className="mesh-editor-btn mesh-editor-btn--primary"
+              onClick={animation?.onOpenMapping}
+              disabled={!animation?.referenceId || animation?.loading}
+              title="Map the reference skeleton's bones to your mesh"
+            >
+              <span className="material-symbols-outlined">
+                {animation?.loading ? 'progress_activity' : (animation?.hasMapping ? 'edit' : 'link')}
+              </span>
+              <span>{animation?.loading ? 'Loading…' : (animation?.hasMapping ? 'Edit mapping' : 'Map bones')}</span>
+            </button>
           </div>
+
+          {animation?.error && (
+            <div className="mesh-editor-feedback mesh-editor-feedback--error mesh-editor-anim__error">
+              <span className="material-symbols-outlined">error</span>
+              <span>{animation.error}</span>
+            </div>
+          )}
+
+          {!animation?.referenceId ? (
+            <div className="mesh-editor-layers-panel__empty">
+              Select a reference mesh, then map its bones to animate your mesh.
+            </div>
+          ) : !animation?.hasMapping ? (
+            <div className="mesh-editor-layers-panel__empty">
+              Map the reference bones to your mesh to load its animations.
+            </div>
+          ) : (
+            <>
+              <button
+                type="button"
+                className={`mesh-editor-anim__floor-btn ${animation?.alignFloor ? 'mesh-editor-anim__floor-btn--on' : ''}`}
+                onClick={animation?.onToggleAlignFloor}
+                title="Sit the animated mesh on the floor grid"
+                aria-pressed={!!animation?.alignFloor}
+              >
+                <span className="material-symbols-outlined">
+                  {animation?.alignFloor ? 'check_box' : 'check_box_outline_blank'}
+                </span>
+                <span>Auto-align to floor</span>
+              </button>
+              <div className="mesh-editor-layers-panel__header">
+                <span className="mesh-editor-layers-panel__title">Animations</span>
+                <span className="mesh-editor-panel__hint">{animation?.clips?.length || 0}</span>
+              </div>
+              <div className="mesh-editor-anim__list">
+                {(animation?.clips || []).map(clip => (
+                  <AnimationClipItem
+                    key={clip.name}
+                    name={clip.name}
+                    previewUrl={animationPreviewUrl(animation.referenceId, clip.name)}
+                    selected={animation.selectedAnimation === clip.name}
+                    busy={animation.retargeting === clip.name}
+                    onSelect={() => animation.onSelectAnimation(clip.name)}
+                  />
+                ))}
+              </div>
+              <span className="mesh-editor-panel__hint">
+                Click an animation to play it on your mesh. Saving/exporting comes later.
+              </span>
+            </>
+          )}
         </div>
       )}
     </aside>

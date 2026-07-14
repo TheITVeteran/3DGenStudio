@@ -21,3 +21,9 @@ export const API_BASE = `${SERVER_ORIGIN}/api`
 export function assetUrl(pathOrFilename) {
   return `${SERVER_ORIGIN}/assets/${encodeURI(pathOrFilename)}`
 }
+
+// Build a URL to a bundled resource served from the backend's /resources mount
+// (e.g. the reference animation library: resources/animations, resources/animpreviews).
+export function resourceUrl(pathOrFilename) {
+  return `${SERVER_ORIGIN}/resources/${encodeURI(pathOrFilename)}`
+}

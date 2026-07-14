@@ -43,6 +43,9 @@ files:
   - setup/**/*
   - tools/**/*
   - wiki/**/*
+  # Bundled reference animation library (mesh2motion, MIT) served at /resources.
+  - resources/animations/**/*
+  - resources/animpreviews/**/*
   - python-server/**/*
   - "!python-server/.venv/**"
   - "!python-server/**/__pycache__/**"

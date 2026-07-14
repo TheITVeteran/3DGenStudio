@@ -175,6 +175,12 @@ app.use(express.json({ limit: '10mb' }));
 app.use('/assets', express.static(ASSETS_DIR));
 app.use('/wiki-media', express.static(WIKI_MEDIA_DIR));
 
+// Bundled reference animation library (mesh2motion, MIT). Ships with the app
+// under resources/ (animations = skinned GLBs with clips, animpreviews = mp4s)
+// and is served read-only for the mesh-editor Auto Rig → Animations feature.
+const RESOURCES_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'resources');
+app.use('/resources', express.static(RESOURCES_DIR));
+
 // Serve the production frontend build (vite build → dist/) from the same
 // origin as the API, so a single `node server.js` can host the whole app on
 // any machine/port. In development the Vite dev server is used instead, so

@@ -153,6 +153,9 @@ import AutoRetopoToolsPanel from '../components/meshEditor/AutoRetopoToolsPanel'
 import AutoRigToolsPanel from '../components/meshEditor/AutoRigToolsPanel'
 import SkeletonOverlay from '../components/meshEditor/SkeletonOverlay'
 import SkeletonPanel from '../components/meshEditor/SkeletonPanel'
+import AnimatedMeshPreview from '../components/meshEditor/AnimatedMeshPreview'
+import BoneMappingModal from '../components/meshEditor/BoneMappingModal'
+import { loadReferenceScene, loadTargetScene, autoMapBones, retargetAnimationClip, getReference } from '../utils/animationLibrary'
 import OptimizeToolsPanel from '../components/meshEditor/OptimizeToolsPanel'
 import { autoUv as runAutoUvService, autoRetopo as runAutoRetopoService, optimizeMesh as runOptimizeService, repairMesh as runRepairService, autoRig as runAutoRigService, ensureDesktopService } from '../utils/meshTools'
 
@@ -450,6 +453,20 @@ export default function MeshEditorPage() {
   // Index of the bone selected in the Skeleton panel / by clicking it on the mesh
   // (null = none). Highlighted in the viewport by SkeletonOverlay.
   const [selectedBone, setSelectedBone] = useState(null)
+
+  // --- Auto Rig → Animations (mesh2motion reference clips retargeted onto the mesh) ---
+  const [animReferenceId, setAnimReferenceId] = useState('')
+  const [animMapping, setAnimMapping] = useState(null)      // { [targetBone]: sourceBone } once saved
+  const [animClips, setAnimClips] = useState([])            // [{ name }] for the selected reference
+  const [selectedAnimation, setSelectedAnimation] = useState(null)
+  const [showBoneMapping, setShowBoneMapping] = useState(false)
+  const [animLoading, setAnimLoading] = useState(false)
+  const [animError, setAnimError] = useState(null)
+  const [animRetargeting, setAnimRetargeting] = useState(null)   // clip name currently retargeting
+  const [animPreview, setAnimPreview] = useState(null)           // { scene, skinnedMesh, clip, floorOffset }
+  const [animAlignFloor, setAnimAlignFloor] = useState(true)     // sit the animated mesh on the grid
+  const animSourceRef = useRef(null)   // loaded reference: { scene, skinnedMesh, boneNames, clips, hipName }
+  const animTargetRef = useRef(null)   // loaded target skinned mesh: { scene, skinnedMesh, boneNames }
   // The rigged GLB blob returned by the service, kept for Save-as-version / download.
   const riggedBlobRef = useRef(null)
   // Watertight check (Auto Retopo panel) — runs on demand via a button.
@@ -1945,6 +1962,15 @@ export default function MeshEditorPage() {
           setSkeleton(loadedSkeleton)
           setShowSkeleton(true)
           setSelectedBone(null)
+          // A new mesh means a new target skeleton — reset the Animations feature.
+          setAnimReferenceId('')
+          setAnimMapping(null)
+          setAnimClips([])
+          setSelectedAnimation(null)
+          setAnimPreview(null)
+          setAnimError(null)
+          animSourceRef.current = null
+          animTargetRef.current = null
           setAutoRigResult(null)
           riggedBlobRef.current = null
           // Bump the camera framing key so CameraRig re-frames the new mesh.
@@ -4086,6 +4112,13 @@ export default function MeshEditorPage() {
       setSkeleton(rigSkeleton)
       setShowSkeleton(true)
       setSelectedBone(null)
+      // The target skeleton changed — drop any cached target scene / mapping so
+      // the Animations tab re-maps against the freshly-rigged bones.
+      animTargetRef.current = null
+      setAnimMapping(null)
+      setAnimClips([])
+      setSelectedAnimation(null)
+      setAnimPreview(null)
 
       const t = stats?.tool || {}
       const rows = []
@@ -4146,6 +4179,130 @@ export default function MeshEditorPage() {
   const handleDismissRigResult = useCallback(() => {
     setAutoRigResult(null)
   }, [])
+
+  // --- Animations: load the user's rigged mesh as an animatable skinned scene ---
+  // Prefer the freshly-rigged blob; otherwise (re)load the mesh's source URL.
+  const ensureAnimTargetScene = useCallback(async () => {
+    if (animTargetRef.current) return animTargetRef.current
+    const riggedBlob = riggedBlobRef.current
+    const riggedBuffer = riggedBlob ? await riggedBlob.arrayBuffer() : null
+    const target = await loadTargetScene({ riggedBuffer, modelUrl })
+    animTargetRef.current = target
+    return target
+  }, [modelUrl])
+
+  const handleSelectAnimReference = useCallback(async (referenceId) => {
+    setAnimReferenceId(referenceId)
+    setAnimMapping(null)
+    setAnimClips([])
+    setSelectedAnimation(null)
+    setAnimPreview(null)
+    setAnimError(null)
+    animSourceRef.current = null
+    if (!referenceId) return
+    setAnimLoading(true)
+    try {
+      const [source] = await Promise.all([loadReferenceScene(referenceId), ensureAnimTargetScene()])
+      animSourceRef.current = source
+    } catch (err) {
+      console.error('Failed to load animation reference:', err)
+      setAnimError(err?.message || 'Failed to load the animation reference.')
+      setAnimReferenceId('')
+    } finally {
+      setAnimLoading(false)
+    }
+  }, [ensureAnimTargetScene])
+
+  const handleOpenBoneMapping = useCallback(async () => {
+    if (!animReferenceId) return
+    setAnimError(null)
+    // Reference + target were loaded on selection, but re-ensure in case of a
+    // fresh rig since then.
+    if (!animSourceRef.current || !animTargetRef.current) {
+      setAnimLoading(true)
+      try {
+        if (!animSourceRef.current) animSourceRef.current = await loadReferenceScene(animReferenceId)
+        await ensureAnimTargetScene()
+      } catch (err) {
+        console.error('Failed to prepare bone mapping:', err)
+        setAnimError(err?.message || 'Failed to prepare bone mapping.')
+        setAnimLoading(false)
+        return
+      }
+      setAnimLoading(false)
+    }
+    setShowBoneMapping(true)
+  }, [animReferenceId, ensureAnimTargetScene])
+
+  const handleAutoMapBones = useCallback(() => {
+    const source = animSourceRef.current
+    const target = animTargetRef.current
+    if (!source || !target) return {}
+    return autoMapBones(source.boneNames, target.boneNames, animReferenceId)
+  }, [animReferenceId])
+
+  const handleSaveBoneMapping = useCallback((mapping) => {
+    setAnimMapping(mapping)
+    setShowBoneMapping(false)
+    const clips = animSourceRef.current?.clips || []
+    setAnimClips(clips.map(c => ({ name: c.name })))
+    setSelectedAnimation(null)
+    setAnimPreview(null)
+  }, [])
+
+  const handleSelectAnimation = useCallback(async (clipName) => {
+    // Toggle off if the same clip is clicked again.
+    if (selectedAnimation === clipName) {
+      setSelectedAnimation(null)
+      setAnimPreview(null)
+      return
+    }
+    const source = animSourceRef.current
+    const target = animTargetRef.current
+    if (!source || !target || !animMapping) return
+    const clip = source.clips.find(c => c.name === clipName)
+    if (!clip) return
+    setSelectedAnimation(clipName)
+    setAnimRetargeting(clipName)
+    setAnimError(null)
+    try {
+      // Let the spinner paint before the (synchronous) frame-by-frame bake.
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))
+      const retargeted = retargetAnimationClip({
+        targetScene: target.scene,
+        targetSkinnedMesh: target.skinnedMesh,
+        sourceScene: source.scene,
+        sourceSkinnedMesh: source.skinnedMesh,
+        clip,
+        mapping: animMapping,
+      })
+      setAnimPreview({ scene: target.scene, skinnedMesh: target.skinnedMesh, clip: retargeted, floorOffset: target.floorOffset || 0 })
+    } catch (err) {
+      console.error('Failed to retarget animation:', err)
+      setAnimError(err?.message || 'Failed to retarget the animation.')
+      setSelectedAnimation(null)
+      setAnimPreview(null)
+    } finally {
+      setAnimRetargeting(null)
+    }
+  }, [selectedAnimation, animMapping])
+
+  // Bundle for the SkeletonPanel Animations tab.
+  const animationPanelProps = useMemo(() => ({
+    referenceId: animReferenceId,
+    onSelectReference: handleSelectAnimReference,
+    onOpenMapping: handleOpenBoneMapping,
+    hasMapping: !!animMapping,
+    clips: animClips,
+    selectedAnimation,
+    onSelectAnimation: handleSelectAnimation,
+    retargeting: animRetargeting,
+    loading: animLoading,
+    error: animError,
+    alignFloor: animAlignFloor,
+    onToggleAlignFloor: () => setAnimAlignFloor(v => !v),
+  }), [animReferenceId, handleSelectAnimReference, handleOpenBoneMapping, animMapping, animClips,
+    selectedAnimation, handleSelectAnimation, animRetargeting, animLoading, animError, animAlignFloor])
 
   // On-demand watertight check for the Auto Retopo panel. The position-welded
   // edge scan can take a moment on dense meshes, so it runs behind a button with
@@ -6517,7 +6674,14 @@ export default function MeshEditorPage() {
                       intensity={displayMode === 'sculpt' ? 0.7 : 0.6}
                       color={displayMode === 'sculpt' ? '#ffffff' : '#8ff5ff'}
                     />
-                    {(activeMenu === 'texturing' || activeMenu === 'painting' || activeMenu === 'projection' || activeMenu === 'optimize') && texturableMesh?.root && displayTextureRef.current && (activeMenu !== 'texturing' || maskTextureRef.current) ? (
+                    {activeMenu === 'autorig' && animPreview ? (
+                      <AnimatedMeshPreview
+                        object={animPreview.scene}
+                        mixerRoot={animPreview.skinnedMesh}
+                        clip={animPreview.clip}
+                        yOffset={animAlignFloor ? animPreview.floorOffset : 0}
+                      />
+                    ) : (activeMenu === 'texturing' || activeMenu === 'painting' || activeMenu === 'projection' || activeMenu === 'optimize') && texturableMesh?.root && displayTextureRef.current && (activeMenu !== 'texturing' || maskTextureRef.current) ? (
                       <TexturedMesh
                         key={textureRevision}
                         root={texturableMesh.root}
@@ -6580,7 +6744,7 @@ export default function MeshEditorPage() {
                         </mesh>
                       </group>
                     )}
-                    <SkeletonOverlay skeleton={skeleton} visible={showSkeleton} selectedBone={selectedBone} />
+                    <SkeletonOverlay skeleton={skeleton} visible={showSkeleton && !animPreview} selectedBone={selectedBone} />
                     <Grid
                       infiniteGrid
                       fadeDistance={60}
@@ -6694,6 +6858,7 @@ export default function MeshEditorPage() {
                 skeleton={skeleton}
                 selectedBone={selectedBone}
                 onSelectBone={setSelectedBone}
+                animation={animationPanelProps}
               />
             )}
 
@@ -7165,6 +7330,17 @@ export default function MeshEditorPage() {
           </div>
         </section>
       </main>
+      {showBoneMapping && animSourceRef.current && animTargetRef.current && (
+        <BoneMappingModal
+          referenceLabel={getReference(animReferenceId)?.label || 'Reference'}
+          sourceBones={animSourceRef.current.boneNames}
+          targetBones={animTargetRef.current.boneNames}
+          initialMapping={animMapping}
+          onAutoMap={handleAutoMapBones}
+          onSave={handleSaveBoneMapping}
+          onClose={() => setShowBoneMapping(false)}
+        />
+      )}
       {showBrushSelector && (
         <AssetSelectorModal
           assetType="brush"
