@@ -10,6 +10,12 @@ start "3DGenStudio Dev" /min cmd /c "npm run dev > dev.log 2>&1"
 :: first run can take a few minutes; output goes to python-server\python-server.log.
 start "3DGenStudio Python" /min cmd /c "cd /d "%~dp0python-server" && run.bat > python-server.log 2>&1"
 
+:: Start the SkinTokens rigging service (Auto Rig, port 8300) the same way. Its
+:: run_server.bat builds a venv + installs torch/flash-attn/model on first launch,
+:: so the FIRST run can take a long while (multi-GB download); output goes to
+:: thirdparty\skintokens\rig-server.log. Needs an NVIDIA GPU (>=14 GB).
+start "3DGenStudio Rigging" /min cmd /c "cd /d "%~dp0thirdparty\skintokens" && run_server.bat > rig-server.log 2>&1"
+
 :: Wait a few seconds to let Vite + the backend spin up
 timeout /t 3 /nobreak >nul
 

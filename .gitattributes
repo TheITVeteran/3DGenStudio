@@ -1,0 +1,11 @@
+# Default: let Git normalize text files, auto-detecting on commit.
+* text=auto
+
+# Shell scripts MUST use LF — CRLF breaks the shebang on Linux/macOS
+# ("bad interpreter: /usr/bin/env bash^M"). core.autocrlf=true would otherwise
+# convert them on checkout.
+*.sh text eol=lf
+
+# Windows batch files need CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf

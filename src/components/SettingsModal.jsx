@@ -488,6 +488,61 @@ export default function SettingsModal({ onClose }) {
                   python-server/run.bat. Can run on another machine or port.
                 </p>
               </div>
+
+              <h3 className="settings-section-title font-label">Rigging (Python) Connection</h3>
+              <div className="settings-api-card">
+                <div className="settings-api-header">
+                  <div className="settings-api-icon">
+                    <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>accessibility_new</span>
+                  </div>
+                  <span className="settings-api-name">Auto Rig</span>
+                </div>
+
+                <div className="settings-grid settings-grid--triple">
+                  <div className="settings-input-group">
+                    <label className="settings-label">Url</label>
+                    <input
+                      className="settings-input"
+                      placeholder="http://127.0.0.1"
+                      value={localSettings?.apis?.rigtools?.url || ''}
+                      onChange={e => setLocalSettings(prev => ({
+                        ...prev,
+                        apis: {
+                          ...prev?.apis,
+                          rigtools: {
+                            ...prev?.apis?.rigtools,
+                            url: e.target.value
+                          }
+                        }
+                      }))}
+                    />
+                  </div>
+
+                  <div className="settings-input-group">
+                    <label className="settings-label">Port</label>
+                    <input
+                      className="settings-input"
+                      placeholder="8300"
+                      value={localSettings?.apis?.rigtools?.port || ''}
+                      onChange={e => setLocalSettings(prev => ({
+                        ...prev,
+                        apis: {
+                          ...prev?.apis,
+                          rigtools: {
+                            ...prev?.apis?.rigtools,
+                            port: e.target.value
+                          }
+                        }
+                      }))}
+                    />
+                  </div>
+                </div>
+
+                <p className="settings-helper-text">
+                  The SkinTokens/TokenRig rigging service (Auto Rig). Start it from
+                  thirdparty/skintokens/run_server.bat. Needs an NVIDIA GPU (≥14 GB).
+                </p>
+              </div>
             </section>
           )}
         </div>

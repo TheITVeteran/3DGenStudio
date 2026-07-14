@@ -24,6 +24,8 @@ import {
   getSelectedHoleLoops,
   loadEditableGeometryFromObject,
   loadEditableGeometryFromGlbBuffer,
+  extractSkeletonFromObject,
+  extractSkeletonFromGlbBuffer,
   mergeSelectedVertices,
   smoothSelectedVertices,
   subdivideSelectedFaces
@@ -148,8 +150,10 @@ import { saveWorkflowDefaults } from '../utils/workflowDefaults'
 import PaintingToolsPanel from '../components/meshEditor/PaintingToolsPanel'
 import AutoUvToolsPanel from '../components/meshEditor/AutoUvToolsPanel'
 import AutoRetopoToolsPanel from '../components/meshEditor/AutoRetopoToolsPanel'
+import AutoRigToolsPanel from '../components/meshEditor/AutoRigToolsPanel'
+import SkeletonOverlay from '../components/meshEditor/SkeletonOverlay'
 import OptimizeToolsPanel from '../components/meshEditor/OptimizeToolsPanel'
-import { autoUv as runAutoUvService, autoRetopo as runAutoRetopoService, optimizeMesh as runOptimizeService, repairMesh as runRepairService } from '../utils/meshTools'
+import { autoUv as runAutoUvService, autoRetopo as runAutoRetopoService, optimizeMesh as runOptimizeService, repairMesh as runRepairService, autoRig as runAutoRigService } from '../utils/meshTools'
 
 // Default option sets for the Python mesh-tools panels. These mirror the
 // defaults of autouv.unwrap() and autoretopo.RetopoConfig 1:1 (see
@@ -193,6 +197,17 @@ const DEFAULT_AUTO_RETOPO_OPTIONS = {
   relax_strength: 0.4,
   device: 'auto',
   seed: 0,
+}
+
+const DEFAULT_AUTO_RIG_OPTIONS = {
+  use_transfer: true,
+  use_postprocess: false,
+  rename_bones: 'mixamo',
+  top_k: 5,
+  top_p: 0.95,
+  temperature: 1.0,
+  repetition_penalty: 2.0,
+  num_beams: 10,
 }
 
 // Non-manifold / topology repair (see python-server/app/schemas.py RepairOptions).
@@ -420,6 +435,18 @@ export default function MeshEditorPage() {
   const [autoRetopoResult, setAutoRetopoResult] = useState(null)
   const [autoUvProgress, setAutoUvProgress] = useState(null)
   const [autoRetopoProgress, setAutoRetopoProgress] = useState(null)
+  // Auto Rig (SkinTokens/TokenRig) — dedicated rigging service.
+  const [autoRigOptions, setAutoRigOptions] = useState(DEFAULT_AUTO_RIG_OPTIONS)
+  const [autoRigRunning, setAutoRigRunning] = useState(false)
+  const [autoRigProgress, setAutoRigProgress] = useState(null)
+  const [autoRigResult, setAutoRigResult] = useState(null)
+  const [autoRigSaving, setAutoRigSaving] = useState(false)
+  // Skeleton overlay: the rig of the currently-loaded mesh (if it arrived rigged)
+  // or of the freshly-generated rig result. `showSkeleton` toggles its visibility.
+  const [skeleton, setSkeleton] = useState(null)
+  const [showSkeleton, setShowSkeleton] = useState(true)
+  // The rigged GLB blob returned by the service, kept for Save-as-version / download.
+  const riggedBlobRef = useRef(null)
   // Watertight check (Auto Retopo panel) — runs on demand via a button.
   const [watertightChecking, setWatertightChecking] = useState(false)
   const [watertightResult, setWatertightResult] = useState(null)
@@ -1863,6 +1890,16 @@ export default function MeshEditorPage() {
         setLoading(true)
         setError('')
         const loadedRoot = await loadMeshRootFromUrl(modelUrl)
+        // Capture any existing skeleton BEFORE the editable/texturable pipelines
+        // consume the graph — an already-rigged mesh (skinned GLB) carries bones
+        // we can show as an overlay. Bone positions are in the same world space
+        // the editable geometry is baked into, so they align.
+        let loadedSkeleton = null
+        try {
+          loadedSkeleton = extractSkeletonFromObject(loadedRoot)
+        } catch (skeletonError) {
+          console.warn('Skeleton extraction failed:', skeletonError)
+        }
         const texturableStartedAt = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now()
 
         const geometryPromise = Promise.resolve().then(() => loadEditableGeometryFromObject(loadedRoot)).then(loadedGeometry => {
@@ -1899,6 +1936,11 @@ export default function MeshEditorPage() {
           setSelectedFaceIndices([])
           setSelectedVertexIndices([])
           setHoleLoops([])
+          // Reset the rig overlay to whatever this mesh arrived with.
+          setSkeleton(loadedSkeleton)
+          setShowSkeleton(true)
+          setAutoRigResult(null)
+          riggedBlobRef.current = null
           // Bump the camera framing key so CameraRig re-frames the new mesh.
           // Topology edits below do NOT bump this so the view stays put.
           setMeshFrameKey(key => key + 1)
@@ -3954,6 +3996,111 @@ export default function MeshEditorPage() {
   }, [])
   const setAutoRetopoOption = useCallback((key, value) => {
     setAutoRetopoOptions(prev => ({ ...prev, [key]: value }))
+  }, [])
+
+  const setAutoRigOption = useCallback((key, value) => {
+    setAutoRigOptions(prev => ({ ...prev, [key]: value }))
+  }, [])
+
+  // Auto Rig: generate a skeleton + skin weights via the SkinTokens rigging
+  // service. Unlike the other mesh tools this does NOT replace the editable
+  // geometry (that would discard the rig) — instead we parse the returned skinned
+  // GLB for a skeleton overlay and keep the blob so it can be saved as a new
+  // version or downloaded. We upload the TEXTURED GLB when available so the
+  // service's rig transfer preserves the texture and scale.
+  const handleRunAutoRig = useCallback(async () => {
+    if (!geometry || autoRigRunning) return
+    setAutoRigRunning(true)
+    setAutoRigResult(null)
+    setAutoRigProgress({ stage: 'start', frac: 0, message: 'Auto Rig starting…' })
+    setError('')
+    setFeedback('Auto Rig…')
+    try {
+      const canExportTextured = !!(
+        texturableMesh?.root
+        && texturableMesh?.textureCanvas
+        && geometry?.attributes?.uv?.count
+      )
+      const meshBinary = canExportTextured
+        ? await exportTexturedMeshToGlb({
+          root: texturableMesh.root,
+          textureKey: texturableMesh.textureKey,
+          textureCanvas: texturableMesh.textureCanvas,
+          textureConfig: texturableMesh.textureConfig,
+        })
+        : await exportGeometryToGlb(geometry)
+      const meshBlob = new Blob([meshBinary], { type: 'model/gltf-binary' })
+
+      const { blob, stats } = await runAutoRigService(meshBlob, {
+        options: autoRigOptions,
+        fileName: 'mesh.glb',
+        onProgress: evt => setAutoRigProgress(evt),
+      })
+
+      const resultBuffer = await blob.arrayBuffer()
+      riggedBlobRef.current = blob
+      const rigSkeleton = await extractSkeletonFromGlbBuffer(resultBuffer)
+      setSkeleton(rigSkeleton)
+      setShowSkeleton(true)
+
+      const t = stats?.tool || {}
+      const rows = []
+      if (rigSkeleton?.jointCount != null) rows.push({ label: 'Bones', value: rigSkeleton.jointCount })
+      else if (t.bones != null) rows.push({ label: 'Bones', value: t.bones })
+      rows.push({ label: 'Bone names', value: autoRigOptions.rename_bones })
+      rows.push({ label: 'Texture preserved', value: autoRigOptions.use_transfer ? 'Yes' : 'No' })
+      if (autoRigOptions.use_postprocess) rows.push({ label: 'Postprocess', value: 'Voxel skin' })
+      setAutoRigResult({ rows })
+      setFeedback('Auto Rig complete.')
+    } catch (err) {
+      console.error('Auto Rig failed:', err)
+      setError(err?.message || 'Auto Rig failed.')
+    } finally {
+      setAutoRigRunning(false)
+      setAutoRigProgress(null)
+    }
+  }, [geometry, autoRigRunning, autoRigOptions, texturableMesh])
+
+  const handleSaveRiggedResult = useCallback(async () => {
+    const blob = riggedBlobRef.current
+    if (!blob || autoRigSaving) return
+    try {
+      setAutoRigSaving(true)
+      setError('')
+      setFeedback('Saving rigged mesh…')
+      const baseName = (meshName || 'mesh').trim() || 'mesh'
+      const meshFile = new File([blob], `${baseName}-rigged.glb`, { type: 'model/gltf-binary' })
+      await saveMeshEdit({
+        assetId: Number.isFinite(numericAssetId) && numericAssetId > 0 ? numericAssetId : null,
+        filePath,
+        name: `${baseName} (rigged)`,
+        saveMode: 'version',
+        meshFile,
+      })
+      setFeedback('Rigged mesh saved as a new version.')
+    } catch (err) {
+      console.error('Failed to save rigged mesh:', err)
+      setError(err?.message || 'Failed to save the rigged mesh.')
+    } finally {
+      setAutoRigSaving(false)
+    }
+  }, [autoRigSaving, meshName, numericAssetId, filePath, saveMeshEdit])
+
+  const handleDownloadRiggedResult = useCallback(() => {
+    const blob = riggedBlobRef.current
+    if (!blob) return
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `${(meshName || 'mesh').trim() || 'mesh'}-rigged.glb`
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }, [meshName])
+
+  const handleDismissRigResult = useCallback(() => {
+    setAutoRigResult(null)
   }, [])
 
   // On-demand watertight check for the Auto Retopo panel. The position-welded
@@ -6051,6 +6198,15 @@ export default function MeshEditorPage() {
                   </button>
                   <button
                     type="button"
+                    className={`mesh-editor-mode-btn ${activeMenu === 'autorig' ? 'mesh-editor-mode-btn--active' : ''}`}
+                    onClick={() => setActiveMenu('autorig')}
+                    title="Automatically generate a skeleton and skin weights (SkinTokens rigging service)"
+                  >
+                    <span className="material-symbols-outlined">accessibility_new</span>
+                    <span>Auto Rig</span>
+                  </button>
+                  <button
+                    type="button"
                     className={`mesh-editor-mode-btn ${activeMenu === 'optimize' ? 'mesh-editor-mode-btn--active' : ''}`}
                     onClick={() => setActiveMenu('optimize')}
                     title="Simplify the mesh with gltfpack (meshoptimizer)"
@@ -6154,6 +6310,20 @@ export default function MeshEditorPage() {
                     onRun: handleRunAutoRetopo,
                     onKeepResult: () => setAutoRetopoResult(null),
                     onRevertResult: () => handleRevertMeshTool(setAutoRetopoResult),
+                    disabled: !geometry
+                  }} />
+                ) : activeMenu === 'autorig' ? (
+                  <AutoRigToolsPanel {...{
+                    options: autoRigOptions, setOption: setAutoRigOption,
+                    running: autoRigRunning, progress: autoRigProgress, result: autoRigResult,
+                    onRun: handleRunAutoRig,
+                    onSaveResult: handleSaveRiggedResult,
+                    onDownloadResult: handleDownloadRiggedResult,
+                    onDismissResult: handleDismissRigResult,
+                    saving: autoRigSaving,
+                    hasSkeleton: !!skeleton,
+                    showSkeleton,
+                    onToggleSkeleton: setShowSkeleton,
                     disabled: !geometry
                   }} />
                 ) : activeMenu === 'optimize' ? (
@@ -6359,6 +6529,7 @@ export default function MeshEditorPage() {
                         </mesh>
                       </group>
                     )}
+                    <SkeletonOverlay skeleton={skeleton} visible={showSkeleton} />
                     <Grid
                       infiniteGrid
                       fadeDistance={60}

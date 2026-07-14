@@ -114,6 +114,14 @@ export function repairMesh(meshBlob, opts = {}) {
   return callMeshTool('/meshes/repair', meshBlob, opts)
 }
 
+// Auto Rig (SkinTokens/TokenRig). Proxies to the dedicated rigging service; the
+// returned blob is a SKINNED GLB (mesh + skeleton + skin weights) — unlike the
+// tools above it must NOT be flattened into editable geometry. Same SSE contract;
+// tool stats carry { bones, rename_bones, transfer, postprocess }.
+export function autoRig(meshBlob, opts = {}) {
+  return callMeshTool('/meshes/rig', meshBlob, opts)
+}
+
 // Runs the bundled gltfpack binary server-side (not the Python service). Unlike
 // the SSE-based tools above, this returns a single JSON envelope with the
 // simplified GLB as base64. Same { blob, stats, previewUrl } contract so it

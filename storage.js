@@ -182,6 +182,10 @@ export const DEFAULT_SETTINGS = {
       url: 'http://127.0.0.1',
       port: '8200'
     },
+    rigtools: {
+      url: 'http://127.0.0.1',
+      port: '8300'
+    },
     custom: []
   }
 };

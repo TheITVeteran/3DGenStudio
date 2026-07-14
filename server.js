@@ -13,7 +13,12 @@ import process from 'node:process';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import si from 'systeminformation';
+import { WebSocket as WsWebSocket } from 'ws';
 import tencentcloudSdk from 'tencentcloud-sdk-nodejs-intl-en';
+
+// Node 20 (bundled by Electron 33) has no global WebSocket, so fall back to the
+// `ws` package. Newer Node runtimes (dev) expose a global WebSocket we can reuse.
+const WebSocketImpl = globalThis.WebSocket ?? WsWebSocket;
 import {
   ASSETS_DIR,
   DATA_DIR,
@@ -896,6 +901,24 @@ function buildMeshToolsBaseUrl(settings = {}) {
   return parsedUrl.toString().replace(/\/$/, '');
 }
 
+// Base URL of the dedicated rigging micro-service (thirdparty/skintokens/rig_server.py).
+// It lives on its own host/port because it needs a heavy GPU/ML environment that
+// must not mix with the mesh-tools service. Mirrors buildMeshToolsBaseUrl.
+function buildRigToolsBaseUrl(settings = {}) {
+  const rigSettings = settings?.apis?.rigtools || {};
+  const rawUrl = String(rigSettings.url || 'http://127.0.0.1').trim();
+  const normalizedUrl = /^https?:\/\//i.test(rawUrl) ? rawUrl : `http://${rawUrl}`;
+  const parsedUrl = new URL(normalizedUrl);
+  const port = String(rigSettings.port || parsedUrl.port || '8300').trim();
+
+  parsedUrl.port = port;
+  parsedUrl.pathname = '';
+  parsedUrl.search = '';
+  parsedUrl.hash = '';
+
+  return parsedUrl.toString().replace(/\/$/, '');
+}
+
 function buildComfyUiWebSocketUrl(baseUrl, clientId) {
   const parsedUrl = new URL(baseUrl);
   const currentPath = parsedUrl.pathname && parsedUrl.pathname !== '/' ? parsedUrl.pathname.replace(/\/$/, '') : '';
@@ -1104,7 +1127,7 @@ function createComfyExecutionMonitor(baseUrl, { clientId, promptId, workflowJson
   };
 
   const ready = new Promise((resolve, reject) => {
-    socket = new WebSocket(wsUrl);
+    socket = new WebSocketImpl(wsUrl);
 
     if (Number.isFinite(timeout) && timeout > 0) {
       timer = setTimeout(() => {
@@ -1306,7 +1329,7 @@ function createComfyExecutionMonitor(baseUrl, { clientId, promptId, workflowJson
     close: () => {
       isSettled = true;
       clearTimeout(timer);
-      if (socket && socket.readyState < WebSocket.CLOSING) {
+      if (socket && socket.readyState < WebSocketImpl.CLOSING) {
         socket.close();
       }
     }
@@ -5731,14 +5754,14 @@ const meshToolsUpload = multer({
   limits: { fileSize: 512 * 1024 * 1024 },
 });
 
-async function proxyMeshTool(operationPath, req, res) {
+async function proxyMeshTool(operationPath, req, res, { baseUrlBuilder = buildMeshToolsBaseUrl } = {}) {
   const meshFile = req.file;
   if (!meshFile?.buffer?.length) {
     return res.status(400).json({ error: 'meshFile is required' });
   }
 
   const settings = await getSettings();
-  const baseUrl = buildMeshToolsBaseUrl(settings);
+  const baseUrl = baseUrlBuilder(settings);
 
   const form = new FormData();
   form.append(
@@ -5831,6 +5854,18 @@ app.post('/api/meshes/repair', meshToolsUpload.single('meshFile'), async (req, r
   } catch (err) {
     console.error('Repair proxy failed:', err);
     if (!res.headersSent) res.status(500).json({ error: err.message || 'Repair failed' });
+  }
+});
+
+// Auto Rig proxies to the dedicated rigging micro-service (SkinTokens/TokenRig),
+// which runs on its own host/port (settings.apis.rigtools) with a GPU/ML stack.
+// Same SSE contract as the mesh-tools routes above.
+app.post('/api/meshes/rig', meshToolsUpload.single('meshFile'), async (req, res) => {
+  try {
+    await proxyMeshTool('/meshes/rig', req, res, { baseUrlBuilder: buildRigToolsBaseUrl });
+  } catch (err) {
+    console.error('Auto Rig proxy failed:', err);
+    if (!res.headersSent) res.status(500).json({ error: err.message || 'Auto Rig failed' });
   }
 });
 

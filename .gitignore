@@ -28,3 +28,16 @@ dev.log
 python-server.log
 
 .claude/
+
+# Python
+__pycache__/
+.venv/
+
+# SkinTokens rigging service — generated / downloaded artifacts (never commit)
+thirdparty/skintokens/.venv/
+thirdparty/skintokens/rig-server.log
+thirdparty/skintokens/experiments/
+thirdparty/skintokens/models/
+thirdparty/skintokens/tmp_ckpt/
+thirdparty/skintokens/tmp_gradio/
+thirdparty/skintokens/results/
