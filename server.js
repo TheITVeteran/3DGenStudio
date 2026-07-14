@@ -5754,7 +5754,7 @@ const meshToolsUpload = multer({
   limits: { fileSize: 512 * 1024 * 1024 },
 });
 
-async function proxyMeshTool(operationPath, req, res, { baseUrlBuilder = buildMeshToolsBaseUrl } = {}) {
+async function proxyMeshTool(operationPath, req, res, { baseUrlBuilder = buildMeshToolsBaseUrl, serviceLabel = 'Mesh Tools' } = {}) {
   const meshFile = req.file;
   if (!meshFile?.buffer?.length) {
     return res.status(400).json({ error: 'meshFile is required' });
@@ -5782,7 +5782,8 @@ async function proxyMeshTool(operationPath, req, res, { baseUrlBuilder = buildMe
   } catch (err) {
     console.error(`Mesh tool proxy (${operationPath}) could not reach the Python service:`, err);
     return res.status(502).json({
-      error: `Could not reach the Mesh Tools (Python) service at ${baseUrl}. Is it running?`,
+      error: `Could not reach the ${serviceLabel} (Python) service at ${baseUrl}. `
+        + `Is it running? (The rigging service can take a while to start on first launch while the model loads.)`,
     });
   }
 
@@ -5862,7 +5863,7 @@ app.post('/api/meshes/repair', meshToolsUpload.single('meshFile'), async (req, r
 // Same SSE contract as the mesh-tools routes above.
 app.post('/api/meshes/rig', meshToolsUpload.single('meshFile'), async (req, res) => {
   try {
-    await proxyMeshTool('/meshes/rig', req, res, { baseUrlBuilder: buildRigToolsBaseUrl });
+    await proxyMeshTool('/meshes/rig', req, res, { baseUrlBuilder: buildRigToolsBaseUrl, serviceLabel: 'Rigging' });
   } catch (err) {
     console.error('Auto Rig proxy failed:', err);
     if (!res.headersSent) res.status(500).json({ error: err.message || 'Auto Rig failed' });

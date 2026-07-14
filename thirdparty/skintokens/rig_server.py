@@ -34,6 +34,7 @@ import base64
 import json
 import os
 import queue
+import shutil
 import struct
 import tempfile
 import threading
@@ -41,11 +42,24 @@ from pathlib import Path
 
 os.environ.setdefault("XFORMERS_IGNORE_FLASH_VERSION_CHECK", "1")
 
-# The bpy_server.py subprocess and the checkpoint paths are resolved relative to
-# the current working directory, so anchor it to this file's location regardless
-# of where the service was launched from.
+# The rig resolves several resources by paths RELATIVE TO THE WORKING DIRECTORY:
+# downloaded weights (experiments/…, models/…) AND static configs the model
+# checkpoint references (configs/skeleton/*.yaml). By default the working dir is
+# this code dir (matches the CLI). In the packaged desktop app the code dir is
+# READ-ONLY, so the app sets RIGTOOLS_DATA_DIR to a writable per-user folder and
+# we chdir there — but that folder must be a COMPLETE run-root. The weights are
+# downloaded into it; here we also mirror the code dir's configs/ into it so the
+# checkpoint's relative config lookups (e.g. configs/skeleton/vroid.yaml) resolve.
+# The bpy_server.py subprocess is launched by absolute path (see BpyServer in
+# rig.py) and `from src…` imports resolve via sys.path, so both are unaffected.
 _HERE = Path(__file__).resolve().parent
-os.chdir(_HERE)
+_DATA_DIR = Path(os.environ.get("RIGTOOLS_DATA_DIR") or _HERE).resolve()
+_DATA_DIR.mkdir(parents=True, exist_ok=True)
+if _DATA_DIR != _HERE:
+    _src_configs = _HERE / "configs"
+    if _src_configs.is_dir():
+        shutil.copytree(_src_configs, _DATA_DIR / "configs", dirs_exist_ok=True)
+os.chdir(_DATA_DIR)
 
 import uvicorn
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile

@@ -14,6 +14,84 @@ function getCustomApiTypeLabel(type) {
   return CUSTOM_API_TYPE_OPTIONS.find(option => option.value === type)?.label || 'Image Generation'
 }
 
+// Desktop-only: install the (opt-in) rigging service after first run — for users
+// who upgraded, skipped it on the setup screen, or later added a GPU. Drives the
+// same uv provisioning as the first-run window via the genStudioSetup bridge and
+// shows live progress. Renders nothing outside the desktop app.
+function RiggingInstaller() {
+  const bridge = typeof window !== 'undefined' ? window.genStudioSetup : null
+  const isDesktop = typeof window !== 'undefined' && window.genStudioDesktop?.isDesktop && bridge
+  const [status, setStatus] = useState(null)
+  const [running, setRunning] = useState(false)
+  const [phase, setPhase] = useState('')
+  const [pct, setPct] = useState(0)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (!isDesktop) return undefined
+    let alive = true
+    bridge.status().then(s => { if (alive) setStatus(s) }).catch(() => {})
+    const off = bridge.onProgress(evt => {
+      if (!alive) return
+      if (evt.kind === 'phase') { setPhase(evt.phase || ''); if (typeof evt.pct === 'number') setPct(evt.pct) }
+      else if (evt.kind === 'error') setError(evt.text || 'Setup failed.')
+    })
+    return () => { alive = false; if (typeof off === 'function') off() }
+  }, [isDesktop, bridge])
+
+  if (!isDesktop) return null
+
+  const handleInstall = async () => {
+    setError(''); setRunning(true); setPhase('Starting…'); setPct(0)
+    try {
+      const res = await bridge.run({ rigging: true })
+      if (res?.ok) setStatus(await bridge.status())
+      else setError(res?.error || 'Installation failed. See details in the setup logs.')
+    } catch (e) {
+      setError(e?.message || 'Installation failed.')
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  if (status?.rigging) {
+    return (
+      <p className="settings-helper-text" style={{ display: 'flex', alignItems: 'center', gap: '0.4em', color: '#4caf50' }}>
+        <span className="material-symbols-outlined" style={{ fontSize: '1.1em' }}>check_circle</span>
+        Rigging service is installed and ready.
+      </p>
+    )
+  }
+
+  return (
+    <div style={{ marginTop: '8px' }}>
+      <button
+        type="button"
+        onClick={handleInstall}
+        disabled={running}
+        style={{
+          fontFamily: 'inherit', fontSize: '13px', fontWeight: 600,
+          cursor: running ? 'default' : 'pointer', opacity: running ? 0.6 : 1,
+          border: 'none', borderRadius: '8px', padding: '9px 16px', color: '#0b0e14',
+          background: 'linear-gradient(90deg, #7c5cff, #22d3ee)',
+        }}
+      >
+        {running ? `Installing… ${Math.round(pct * 100)}%` : 'Install rigging service'}
+      </button>
+      {running && (
+        <>
+          <div style={{ height: '6px', borderRadius: '4px', background: 'rgba(255,255,255,0.08)', marginTop: '8px', overflow: 'hidden' }}>
+            <div style={{ height: '100%', width: `${Math.round(pct * 100)}%`, background: 'linear-gradient(90deg, #7c5cff, #22d3ee)', transition: 'width .3s' }} />
+          </div>
+          <p className="settings-helper-text" style={{ marginTop: '4px' }}>{phase}</p>
+        </>
+      )}
+      {error && <p className="settings-helper-text" style={{ color: '#f87171' }}>{error}</p>}
+      <p className="settings-helper-text">One-time install; downloads several GB and needs an NVIDIA GPU (≥14 GB).</p>
+    </div>
+  )
+}
+
 export default function SettingsModal({ onClose }) {
   const { settings, updateSettings, addCustomApi } = useSettings()
   const [localSettings, setLocalSettings] = useState(settings)
@@ -539,9 +617,10 @@ export default function SettingsModal({ onClose }) {
                 </div>
 
                 <p className="settings-helper-text">
-                  The SkinTokens/TokenRig rigging service (Auto Rig). Start it from
-                  thirdparty/skintokens/run_server.bat. Needs an NVIDIA GPU (≥14 GB).
+                  The SkinTokens/TokenRig rigging service (Auto Rig). Needs an NVIDIA GPU (≥14 GB).
+                  Outside the desktop app, start it from thirdparty/skintokens/run_server.
                 </p>
+                <RiggingInstaller />
               </div>
             </section>
           )}

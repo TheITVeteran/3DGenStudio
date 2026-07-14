@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<style>
+  :root {
+    --bg: #0d0f14; --card: #141821; --text: #e8eaf0; --muted: #8b91a3;
+    --accent1: #7c5cff; --accent2: #22d3ee; --ok: #4ade80; --err: #f87171;
+    --line: rgba(255,255,255,0.08);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; background: var(--bg); color: var(--text); overflow: hidden; }
+  body {
+    font-family: "Space Grotesk", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-user-select: none; user-select: none;
+    display: flex; flex-direction: column; padding: 26px 30px; gap: 16px;
+  }
+  h1 {
+    font-size: 20px; font-weight: 700;
+    background: linear-gradient(90deg, #fff, #c9c2ff 60%, #9be9ff);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .sub { font-size: 12.5px; color: var(--muted); margin-top: -8px; }
+  .services { display: flex; flex-direction: column; gap: 10px; }
+  .svc {
+    border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px;
+    background: var(--card); display: flex; flex-direction: column; gap: 8px;
+  }
+  .svc__head { display: flex; align-items: center; gap: 10px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: #3a3f4b; flex: none; transition: background .3s; }
+  .dot.running { background: var(--accent2); box-shadow: 0 0 10px var(--accent2); animation: pulse 1.2s infinite; }
+  .dot.done { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+  .dot.error { background: var(--err); box-shadow: 0 0 8px var(--err); }
+  @keyframes pulse { 0%,100%{opacity:.5} 50%{opacity:1} }
+  .svc__name { font-size: 14px; font-weight: 600; }
+  .svc__tag { font-size: 11px; color: var(--muted); margin-left: auto; }
+  .svc__phase { font-size: 12px; color: var(--muted); min-height: 15px; }
+  .bar { height: 6px; border-radius: 4px; background: rgba(255,255,255,0.06); overflow: hidden; }
+  .bar > i { display: block; height: 100%; width: 0; border-radius: 4px;
+    background: linear-gradient(90deg, var(--accent1), var(--accent2)); transition: width .3s; }
+  label.opt { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); cursor: pointer; }
+  label.opt input { accent-color: var(--accent1); width: 15px; height: 15px; }
+  .log {
+    flex: 1; min-height: 90px; border: 1px solid var(--line); border-radius: 10px;
+    background: #0a0c11; color: #9aa3b2; font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+    font-size: 11px; line-height: 1.45; padding: 10px 12px; overflow-y: auto; white-space: pre-wrap;
+    display: none;
+  }
+  .row { display: flex; align-items: center; gap: 12px; }
+  .spacer { flex: 1; }
+  button {
+    font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+    border: 1px solid var(--line); border-radius: 10px; padding: 9px 18px;
+    background: #1b2130; color: var(--text); transition: filter .2s, opacity .2s;
+  }
+  button.primary { border: none; background: linear-gradient(90deg, var(--accent1), var(--accent2)); color: #0b0e14; }
+  button:hover { filter: brightness(1.12); }
+  button:disabled { opacity: .45; cursor: default; filter: none; }
+  .err { color: var(--err); font-size: 12px; min-height: 15px; }
+  .link { color: var(--accent2); cursor: pointer; font-size: 11.5px; }
+</style>
+</head>
+<body>
+  <div>
+    <h1>Set up 3D Gen Studio</h1>
+    <div class="sub">First launch installs the local Python services. This runs once; later launches are instant.</div>
+  </div>
+
+  <div class="services">
+    <div class="svc" id="svc-meshtools">
+      <div class="svc__head">
+        <span class="dot"></span>
+        <span class="svc__name">Mesh Tools</span>
+        <span class="svc__tag">required · Auto UV / Retopo</span>
+      </div>
+      <div class="svc__phase">Waiting to start…</div>
+      <div class="bar"><i></i></div>
+    </div>
+
+    <div class="svc" id="svc-rigging">
+      <div class="svc__head">
+        <span class="dot"></span>
+        <span class="svc__name">Rigging (Auto Rig)</span>
+        <span class="svc__tag">optional · NVIDIA GPU, large download</span>
+      </div>
+      <label class="opt"><input type="checkbox" id="opt-rigging" /> Install the AI rigging service (needs an NVIDIA GPU ≥14 GB; downloads several GB)</label>
+      <div class="svc__phase" style="display:none"></div>
+      <div class="bar" style="display:none"><i></i></div>
+    </div>
+  </div>
+
+  <div class="err" id="err"></div>
+  <div class="log" id="log"></div>
+
+  <div class="row">
+    <span class="link" id="toggle-log">Show details</span>
+    <div class="spacer"></div>
+    <button id="btn-install" class="primary">Install &amp; continue</button>
+    <button id="btn-launch" class="primary" style="display:none">Launch 3D Gen Studio</button>
+  </div>
+
+<script>
+  const $ = (s) => document.querySelector(s);
+  const rows = {
+    meshtools: $('#svc-meshtools'),
+    rigging: $('#svc-rigging'),
+    uv: $('#svc-meshtools'), // uv provisioning shows under the first row
+  };
+  const logEl = $('#log');
+  const errEl = $('#err');
+
+  function setRow(service, { state, phase, pct }) {
+    const row = rows[service];
+    if (!row) return;
+    const dot = row.querySelector('.dot');
+    const phaseEl = row.querySelector('.svc__phase');
+    const bar = row.querySelector('.bar > i');
+    if (service === 'rigging') { // reveal rigging progress once it starts
+      row.querySelector('.svc__phase').style.display = '';
+      row.querySelector('.bar').style.display = '';
+    }
+    if (state) { dot.className = 'dot ' + state; }
+    if (phase != null && phaseEl) phaseEl.textContent = phase;
+    if (pct != null && bar) bar.style.width = Math.round(pct * 100) + '%';
+  }
+
+  window.genStudioSetup.onProgress((evt) => {
+    if (evt.kind === 'log') {
+      logEl.textContent += evt.text;
+      logEl.scrollTop = logEl.scrollHeight;
+      return;
+    }
+    if (evt.kind === 'phase') {
+      setRow(evt.service, { state: 'running', phase: evt.phase, pct: evt.pct });
+    } else if (evt.kind === 'done') {
+      setRow(evt.service, { state: 'done', phase: 'Done', pct: 1 });
+    } else if (evt.kind === 'error') {
+      setRow(evt.service, { state: 'error' });
+      errEl.textContent = evt.text || 'Setup failed.';
+    }
+  });
+
+  $('#toggle-log').addEventListener('click', () => {
+    const show = logEl.style.display === 'none' || !logEl.style.display;
+    logEl.style.display = show ? 'block' : 'none';
+    $('#toggle-log').textContent = show ? 'Hide details' : 'Show details';
+  });
+
+  async function runInstall() {
+    errEl.textContent = '';
+    const rigging = $('#opt-rigging').checked;
+    $('#btn-install').disabled = true;
+    $('#opt-rigging').disabled = true;
+    setRow('meshtools', { state: 'running', phase: 'Starting…', pct: 0 });
+    const res = await window.genStudioSetup.run({ rigging });
+    if (res && res.ok) {
+      $('#btn-install').style.display = 'none';
+      $('#btn-launch').style.display = '';
+    } else {
+      errEl.textContent = (res && res.error) || 'Setup failed. See details.';
+      $('#btn-install').disabled = false;
+      $('#opt-rigging').disabled = false;
+      $('#btn-install').textContent = 'Retry';
+    }
+  }
+
+  $('#btn-install').addEventListener('click', runInstall);
+  $('#btn-launch').addEventListener('click', () => window.genStudioSetup.finish());
+</script>
+</body>
+</html>

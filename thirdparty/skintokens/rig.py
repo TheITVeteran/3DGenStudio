@@ -79,8 +79,16 @@ class BpyServer:
         if self._proc is not None:
             return self
 
+        # Launch bpy_server.py by ABSOLUTE path with cwd pinned to this code dir.
+        # The main process may run with a different cwd (e.g. the packaged app
+        # points it at a writable model-data dir), so relying on a relative
+        # "bpy_server.py" / the inherited cwd would break. Its `from src...`
+        # imports resolve via sys.path (the script's own dir), and it only writes
+        # to explicit temp paths, so a read-only code dir as cwd is fine.
+        here = Path(__file__).resolve().parent
         popen_kwargs = dict(
-            args=[sys.executable, "bpy_server.py"],
+            args=[sys.executable, str(here / "bpy_server.py")],
+            cwd=str(here),
             stdout=None,
             stderr=None,
         )

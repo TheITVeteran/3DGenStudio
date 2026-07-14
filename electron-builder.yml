@@ -47,6 +47,16 @@ files:
   - "!python-server/.venv/**"
   - "!python-server/**/__pycache__/**"
   - "!python-server/*.log"
+  # Rigging service (opt-in). Ship the source; the venv + multi-GB model
+  # checkpoints are provisioned into the per-user data dir on opt-in, never shipped.
+  - thirdparty/skintokens/**/*
+  - "!thirdparty/skintokens/.venv/**"
+  - "!thirdparty/skintokens/**/__pycache__/**"
+  - "!thirdparty/skintokens/experiments/**"
+  - "!thirdparty/skintokens/models/**"
+  - "!thirdparty/skintokens/tmp_ckpt/**"
+  - "!thirdparty/skintokens/tmp_gradio/**"
+  - "!thirdparty/skintokens/*.log"
   - "!**/*.map"
 
 win:

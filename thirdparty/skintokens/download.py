@@ -1,6 +1,7 @@
 from huggingface_hub import hf_hub_download, snapshot_download
 
 import argparse
+import os
 
 REPO_ID = "VAST-AI/SkinTokens"
 
@@ -18,19 +19,19 @@ LLM_REPO = "Qwen/Qwen3-0.6B"
 LLM_LOCAL_DIR = "models/Qwen3-0.6B"
 
 
-def download_model(name: str):
+def download_model(name: str, out_dir: str = "."):
     local_path = hf_hub_download(
         repo_id=REPO_ID,
         filename=name,
-        local_dir=".",
+        local_dir=out_dir,
     )
     print(f"[MODEL] {name} downloaded to: {local_path}")
 
 
-def download_llm():
+def download_llm(out_dir: str = "."):
     local_path = snapshot_download(
         repo_id=LLM_REPO,
-        local_dir=LLM_LOCAL_DIR,
+        local_dir=os.path.join(out_dir, LLM_LOCAL_DIR),
         ignore_patterns=["*.bin", "*.safetensors"],
     )
     print(f"[LLM] Config downloaded to: {local_path}")
@@ -55,14 +56,17 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", action="store_true", help="Download model checkpoints")
     parser.add_argument("--data", action="store_true", help="Download datasets")
+    parser.add_argument("--dir", default=".",
+                        help="Destination directory for the downloads (default: current dir). "
+                             "Use a writable path when the code dir is read-only.")
     args = parser.parse_args()
     if not args.model and not args.data:
         print("Please specify --model or --data")
         return
     if args.model:
         for model in MODELS:
-            download_model(model)
-        download_llm()
+            download_model(model, args.dir)
+        download_llm(args.dir)
     if args.data:
         for data in DATASETS:
             download_data(data)
