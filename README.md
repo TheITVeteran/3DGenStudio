@@ -19,6 +19,7 @@
 
 | Date | Description |
 | --- | --- |
+| **2026-07-15** | MeshEditor: Auto Rig with Skintokens<br>Fixed Desktop App Setup |
 | **2026-07-10** | Desktop App Installer<br>Speed up Auto Retopo<br>Added Clean Non-Manifold Edges in Auto Retopo |
 | **2026-07-08** | Added Hitem3D API v1 |
 | **2026-07-07** | Fixed slowness when queuing multiple ComfyUI workflows<br>SetupWizard: Added Gen Mesh with Hy2.0<br>MeshEditor - Projection: Fixed Blend overlap seams with original texture |
@@ -112,6 +113,9 @@ Each stage feeds the next. Use **ComfyUI** workflows or external APIs at any ste
 4. **Painting:** Paint directly on your mesh using brushes/images.
 5. **Displace:** Use a brush to displace the vertices with tessellation.
 6. **Projection:** With ComfyUI, project views on the mesh to get higher texture quality.
+7. **Auto UV:** Automatically unwrap your mesh to generate clean UV coordinates.
+8. **Auto Retopo:** Automatically retopologize your mesh for a cleaner, optimized topology (with non-manifold edge cleanup).
+9. **Auto Rig:** Automatically generate a skeleton and skin weights for your mesh using AI.
 
 ---
 
@@ -204,6 +208,15 @@ Open the application and configure your services in the settings area:
 ## Documentation
 
 You will find some documentation here: https://github.com/visualbruno/3DGenStudio/tree/main/docs
+
+---
+
+## 🙏 Acknowledgments
+
+3D Gen Studio builds on the great work of the open-source community. Special thanks to:
+
+- [**SkinTokens**](https://github.com/VAST-AI-Research/SkinTokens) — used in **Auto Rig** for AI-powered skeleton generation and skinning.
+- [**mesh2motion-app**](https://github.com/Mesh2Motion/mesh2motion-app) — used in **Auto Rig** for skeleton/animation reference.
 
 ---
 

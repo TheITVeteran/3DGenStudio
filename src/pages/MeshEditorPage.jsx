@@ -155,7 +155,7 @@ import SkeletonOverlay from '../components/meshEditor/SkeletonOverlay'
 import SkeletonPanel from '../components/meshEditor/SkeletonPanel'
 import AnimatedMeshPreview from '../components/meshEditor/AnimatedMeshPreview'
 import BoneMappingModal from '../components/meshEditor/BoneMappingModal'
-import { loadReferenceScene, loadReferenceRigScene, loadTargetScene, autoMapBones, retargetAnimationClip, findUpperArmTargets, getReference } from '../utils/animationLibrary'
+import { loadReferenceScene, loadReferenceRigScene, loadTargetScene, autoMapBones, retargetAnimationClip, exportAnimatedGlb, findUpperArmTargets, getReference } from '../utils/animationLibrary'
 import OptimizeToolsPanel from '../components/meshEditor/OptimizeToolsPanel'
 import { autoUv as runAutoUvService, autoRetopo as runAutoRetopoService, optimizeMesh as runOptimizeService, repairMesh as runRepairService, autoRig as runAutoRigService, ensureDesktopService } from '../utils/meshTools'
 
@@ -468,8 +468,11 @@ export default function MeshEditorPage() {
   const [animAlignFloor, setAnimAlignFloor] = useState(true)     // sit the animated mesh on the grid
   const [animArmExtension, setAnimArmExtension] = useState(0)    // Expand/Contract arms (%)
   const [animArmTargets, setAnimArmTargets] = useState(null)     // { left:[], right:[] } upper-arm target bones
+  const [checkedAnimations, setCheckedAnimations] = useState(() => new Set())  // clip names ticked for Save
+  const [animSaving, setAnimSaving] = useState(false)            // exporting/saving the animated mesh
   const animSourceRef = useRef(null)   // loaded reference: { scene, skinnedMesh, boneNames, clips, hipName }
   const animTargetRef = useRef(null)   // loaded target skinned mesh: { scene, skinnedMesh, boneNames }
+  const retargetedClipsRef = useRef(new Map())  // clipName -> retargeted THREE.AnimationClip (cache)
   // The rigged GLB blob returned by the service, kept for Save-as-version / download.
   const riggedBlobRef = useRef(null)
   // Watertight check (Auto Retopo panel) — runs on demand via a button.
@@ -1974,8 +1977,10 @@ export default function MeshEditorPage() {
           setAnimError(null)
           setAnimArmTargets(null)
           setAnimArmExtension(0)
+          setCheckedAnimations(new Set())
           animSourceRef.current = null
           animTargetRef.current = null
+          retargetedClipsRef.current.clear()
           setAutoRigResult(null)
           riggedBlobRef.current = null
           // Bump the camera framing key so CameraRig re-frames the new mesh.
@@ -4120,12 +4125,14 @@ export default function MeshEditorPage() {
       // The target skeleton changed — drop any cached target scene / mapping so
       // the Animations tab re-maps against the freshly-rigged bones.
       animTargetRef.current = null
+      retargetedClipsRef.current.clear()
       setAnimMapping(null)
       setAnimClips([])
       setSelectedAnimation(null)
       setAnimPreview(null)
       setAnimArmTargets(null)
       setAnimArmExtension(0)
+      setCheckedAnimations(new Set())
 
       const t = stats?.tool || {}
       const rows = []
@@ -4206,7 +4213,9 @@ export default function MeshEditorPage() {
     setSelectedAnimation(null)
     setAnimPreview(null)
     setAnimError(null)
+    setCheckedAnimations(new Set())
     animSourceRef.current = null
+    retargetedClipsRef.current.clear()
     if (!referenceId) return
     setAnimLoading(true)
     try {
@@ -4273,7 +4282,35 @@ export default function MeshEditorPage() {
     setAnimClips(clips.map(c => ({ name: c.name })))
     setSelectedAnimation(null)
     setAnimPreview(null)
+    // A re-map invalidates every retargeted clip (they were baked against the old
+    // mapping) and any pending Save selection.
+    retargetedClipsRef.current.clear()
+    setCheckedAnimations(new Set())
   }, [])
+
+  // Retarget a reference clip onto the target skeleton, memoised by clip name so
+  // playback and Save reuse the same bake. Returns the THREE.AnimationClip.
+  const getRetargetedClip = useCallback(async (clipName) => {
+    const cached = retargetedClipsRef.current.get(clipName)
+    if (cached) return cached
+    const source = animSourceRef.current
+    const target = animTargetRef.current
+    if (!source || !target || !animMapping) return null
+    const clip = source.clips.find(c => c.name === clipName)
+    if (!clip) return null
+    // Let the spinner paint before the (synchronous) frame-by-frame bake.
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))
+    const retargeted = retargetAnimationClip({
+      targetScene: target.scene,
+      targetSkinnedMesh: target.skinnedMesh,
+      sourceScene: source.scene,
+      sourceSkinnedMesh: source.skinnedMesh,
+      clip,
+      mapping: animMapping,
+    })
+    retargetedClipsRef.current.set(clipName, retargeted)
+    return retargeted
+  }, [animMapping])
 
   const handleSelectAnimation = useCallback(async (clipName) => {
     // Toggle off if the same clip is clicked again.
@@ -4282,25 +4319,14 @@ export default function MeshEditorPage() {
       setAnimPreview(null)
       return
     }
-    const source = animSourceRef.current
     const target = animTargetRef.current
-    if (!source || !target || !animMapping) return
-    const clip = source.clips.find(c => c.name === clipName)
-    if (!clip) return
+    if (!animSourceRef.current || !target || !animMapping) return
     setSelectedAnimation(clipName)
     setAnimRetargeting(clipName)
     setAnimError(null)
     try {
-      // Let the spinner paint before the (synchronous) frame-by-frame bake.
-      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))
-      const retargeted = retargetAnimationClip({
-        targetScene: target.scene,
-        targetSkinnedMesh: target.skinnedMesh,
-        sourceScene: source.scene,
-        sourceSkinnedMesh: source.skinnedMesh,
-        clip,
-        mapping: animMapping,
-      })
+      const retargeted = await getRetargetedClip(clipName)
+      if (!retargeted) throw new Error('Animation clip not found.')
       setAnimPreview({ scene: target.scene, skinnedMesh: target.skinnedMesh, clip: retargeted, floorOffset: target.floorOffset || 0 })
     } catch (err) {
       console.error('Failed to retarget animation:', err)
@@ -4310,7 +4336,51 @@ export default function MeshEditorPage() {
     } finally {
       setAnimRetargeting(null)
     }
-  }, [selectedAnimation, animMapping])
+  }, [selectedAnimation, animMapping, getRetargetedClip])
+
+  const handleToggleAnimationChecked = useCallback((clipName) => {
+    setCheckedAnimations(prev => {
+      const next = new Set(prev)
+      if (next.has(clipName)) next.delete(clipName)
+      else next.add(clipName)
+      return next
+    })
+  }, [])
+
+  const handleSaveAnimations = useCallback(async () => {
+    const names = animClips.map(c => c.name).filter(n => checkedAnimations.has(n))
+    const target = animTargetRef.current
+    if (!names.length || !target || animSaving) return
+    try {
+      setAnimSaving(true)
+      setAnimError(null)
+      setError('')
+      setFeedback(`Baking ${names.length} animation${names.length === 1 ? '' : 's'}…`)
+      const clips = []
+      for (const name of names) {
+        const clip = await getRetargetedClip(name)
+        if (clip) clips.push(clip)
+      }
+      if (!clips.length) throw new Error('None of the selected animations could be retargeted.')
+      setFeedback('Saving animated mesh…')
+      const blob = await exportAnimatedGlb({ scene: target.scene, clips })
+      const baseName = (meshName || 'mesh').trim() || 'mesh'
+      const meshFile = new File([blob], `${baseName}-animated.glb`, { type: 'model/gltf-binary' })
+      await saveMeshEdit({
+        assetId: Number.isFinite(numericAssetId) && numericAssetId > 0 ? numericAssetId : null,
+        filePath,
+        name: `${baseName} (animated)`,
+        saveMode: 'version',
+        meshFile,
+      })
+      setFeedback(`Saved mesh with ${clips.length} animation${clips.length === 1 ? '' : 's'} as a new version.`)
+    } catch (err) {
+      console.error('Failed to save animated mesh:', err)
+      setAnimError(err?.message || 'Failed to save the animated mesh.')
+    } finally {
+      setAnimSaving(false)
+    }
+  }, [animClips, checkedAnimations, animSaving, getRetargetedClip, meshName, numericAssetId, filePath, saveMeshEdit])
 
   // Bundle for the SkeletonPanel Animations tab.
   const animationPanelProps = useMemo(() => ({
@@ -4329,9 +4399,13 @@ export default function MeshEditorPage() {
     armExtension: animArmExtension,
     onArmExtensionChange: setAnimArmExtension,
     canAdjustArms: !!(animArmTargets && (animArmTargets.left.length || animArmTargets.right.length)),
+    checkedAnimations,
+    onToggleChecked: handleToggleAnimationChecked,
+    saving: animSaving,
+    onSave: handleSaveAnimations,
   }), [animReferenceId, handleSelectAnimReference, handleOpenBoneMapping, animMapping, animClips,
     selectedAnimation, handleSelectAnimation, animRetargeting, animLoading, animError, animAlignFloor,
-    animArmExtension, animArmTargets])
+    animArmExtension, animArmTargets, checkedAnimations, handleToggleAnimationChecked, animSaving, handleSaveAnimations])
 
   // On-demand watertight check for the Auto Retopo panel. The position-welded
   // edge scan can take a moment on dense meshes, so it runs behind a button with
