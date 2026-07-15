@@ -21,7 +21,7 @@ export const EXPORT_FORMATS = [
   {
     value: 'blender', label: 'Blender — GLB (rig + animations)', extension: 'glb', multiFile: false,
     kind: 'preset', preset: 'blender', requiresService: false,
-    hint: 'Blender imports GLB natively (File > Import > glTF 2.0) with the skeleton and every animation clip. GLB source assets are copied byte-for-byte for perfect fidelity.'
+    hint: 'Blender imports GLB natively (File > Import > glTF 2.0) with the skeleton and every animation clip. GLB source assets are copied byte-for-byte for perfect fidelity. Note: Blender’s importer may add an "Icosphere" bone-widget object — it is viewport dressing created at import time, not part of the file (set Bone Dir to "Temperance" to avoid it).'
   },
   {
     value: 'unity', label: 'Unity — FBX (rig + animation takes)', extension: 'fbx', multiFile: false,

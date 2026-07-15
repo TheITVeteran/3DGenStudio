@@ -190,6 +190,27 @@ def _action_fcurves(action):
     ]
 
 
+def _remove_bone_widget_objects() -> None:
+    """Delete bone display-widget objects (pose bones' custom shapes).
+
+    Belt and braces on top of bone_heuristic='TEMPERANCE': should any import
+    path still attach widget meshes to pose bones, they must never reach the
+    FBX (they are viewport dressing, not scene content).
+    """
+    import bpy
+
+    widgets = set()
+    for obj in bpy.context.scene.objects:
+        if obj.type != "ARMATURE":
+            continue
+        for pose_bone in obj.pose.bones:
+            if pose_bone.custom_shape is not None:
+                widgets.add(pose_bone.custom_shape)
+                pose_bone.custom_shape = None
+    for widget in widgets:
+        bpy.data.objects.remove(widget, do_unlink=True)
+
+
 def validate_reimport(path: str, in_stats: dict, clip_names: list[str]) -> dict:
     """Re-import the exported FBX into a fresh scene and assert nothing was lost."""
     import bpy
@@ -231,7 +252,11 @@ def convert(input_path: str, output_path: str, opts: dict) -> dict:
     scene.render.fps_base = 1.0
 
     progress("import", 0.1, "Importing GLB…")
-    bpy.ops.import_scene.gltf(filepath=input_path)
+    # bone_heuristic: the default 'BLENDER' creates an "Icosphere" mesh object
+    # as the bones' display widget — a real scene object the FBX exporter would
+    # happily ship to the engine. 'TEMPERANCE' only orients bones, no widgets.
+    bpy.ops.import_scene.gltf(filepath=input_path, bone_heuristic="TEMPERANCE")
+    _remove_bone_widget_objects()
 
     objects = list(scene.objects)
     clip_names = normalize_nla(objects)
