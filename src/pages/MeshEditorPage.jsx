@@ -155,7 +155,7 @@ import SkeletonOverlay from '../components/meshEditor/SkeletonOverlay'
 import SkeletonPanel from '../components/meshEditor/SkeletonPanel'
 import AnimatedMeshPreview from '../components/meshEditor/AnimatedMeshPreview'
 import BoneMappingModal from '../components/meshEditor/BoneMappingModal'
-import { loadReferenceScene, loadTargetScene, autoMapBones, retargetAnimationClip, findUpperArmTargets, getReference } from '../utils/animationLibrary'
+import { loadReferenceScene, loadReferenceRigScene, loadTargetScene, autoMapBones, retargetAnimationClip, findUpperArmTargets, getReference } from '../utils/animationLibrary'
 import OptimizeToolsPanel from '../components/meshEditor/OptimizeToolsPanel'
 import { autoUv as runAutoUvService, autoRetopo as runAutoRetopoService, optimizeMesh as runOptimizeService, repairMesh as runRepairService, autoRig as runAutoRigService, ensureDesktopService } from '../utils/meshTools'
 
@@ -460,6 +460,7 @@ export default function MeshEditorPage() {
   const [animClips, setAnimClips] = useState([])            // [{ name }] for the selected reference
   const [selectedAnimation, setSelectedAnimation] = useState(null)
   const [showBoneMapping, setShowBoneMapping] = useState(false)
+  const [boneMapSkeletons, setBoneMapSkeletons] = useState(null)  // { source, target } skeleton data for the mapping 3D views
   const [animLoading, setAnimLoading] = useState(false)
   const [animError, setAnimError] = useState(null)
   const [animRetargeting, setAnimRetargeting] = useState(null)   // clip name currently retargeting
@@ -4200,6 +4201,7 @@ export default function MeshEditorPage() {
   const handleSelectAnimReference = useCallback(async (referenceId) => {
     setAnimReferenceId(referenceId)
     setAnimMapping(null)
+    setBoneMapSkeletons(null)
     setAnimClips([])
     setSelectedAnimation(null)
     setAnimPreview(null)
@@ -4237,6 +4239,22 @@ export default function MeshEditorPage() {
       }
       setAnimLoading(false)
     }
+
+    // Build the plain skeleton data (joints/segments/names) that feeds the modal's
+    // two 3D bone views. Source prefers the clean skeleton-only rig GLB (same bone
+    // names as the animation GLB, no skinned mesh); falls back to the loaded
+    // reference scene. Target comes from the user's loaded rigged scene.
+    let source = null
+    try {
+      const rig = await loadReferenceRigScene(animReferenceId)
+      source = extractSkeletonFromObject(rig.scene)
+    } catch (err) {
+      console.warn('Rig GLB unavailable, using the animation scene skeleton:', err)
+    }
+    if (!source && animSourceRef.current?.scene) source = extractSkeletonFromObject(animSourceRef.current.scene)
+    const target = animTargetRef.current?.scene ? extractSkeletonFromObject(animTargetRef.current.scene) : null
+    setBoneMapSkeletons({ source, target })
+
     setShowBoneMapping(true)
   }, [animReferenceId, ensureAnimTargetScene])
 
@@ -7349,6 +7367,8 @@ export default function MeshEditorPage() {
           referenceLabel={getReference(animReferenceId)?.label || 'Reference'}
           sourceBones={animSourceRef.current.boneNames}
           targetBones={animTargetRef.current.boneNames}
+          sourceSkeleton={boneMapSkeletons?.source}
+          targetSkeleton={boneMapSkeletons?.target}
           initialMapping={animMapping}
           onAutoMap={handleAutoMapBones}
           onSave={handleSaveBoneMapping}

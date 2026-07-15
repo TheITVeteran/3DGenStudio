@@ -3,12 +3,20 @@
 // bones (target, right column) so clips can be retargeted. Mirrors the
 // mesh2motion mapping UI: drag a source bone onto a target row, or click a
 // source then a target. Auto-Map fills the mapping heuristically.
+//
+// To make it obvious *where* each bone lives (names alone rarely tell you), the
+// far-left column shows two live 3D skeletons — the reference (source) on top
+// and the user's mesh (target) below. Click a bone in a view to select it (same
+// as clicking its row), and hovering a list row flashes that bone in 3D.
 import { useEffect, useMemo, useState } from 'react'
+import BoneSkeletonView from './BoneSkeletonView'
 
 export default function BoneMappingModal({
   referenceLabel,
   sourceBones,
   targetBones,
+  sourceSkeleton,
+  targetSkeleton,
   initialMapping,
   onAutoMap,
   onSave,
@@ -18,6 +26,9 @@ export default function BoneMappingModal({
   const [sourceFilter, setSourceFilter] = useState('')
   const [targetFilter, setTargetFilter] = useState('')
   const [pickedSource, setPickedSource] = useState(null)
+  const [pickedTarget, setPickedTarget] = useState(null)
+  const [hoverSource, setHoverSource] = useState(null)
+  const [hoverTarget, setHoverTarget] = useState(null)
   const [dragSource, setDragSource] = useState(null)
 
   // Close on Escape.
@@ -28,6 +39,7 @@ export default function BoneMappingModal({
   }, [onClose])
 
   const mappedSources = useMemo(() => new Set(Object.values(mapping)), [mapping])
+  const mappedTargets = useMemo(() => new Set(Object.keys(mapping)), [mapping])
   const mappedCount = Object.keys(mapping).length
 
   const filteredSources = useMemo(
@@ -59,6 +71,7 @@ export default function BoneMappingModal({
   }
 
   const handleTargetClick = targetName => {
+    setPickedTarget(targetName)
     if (pickedSource) assign(targetName, pickedSource)
   }
 
@@ -67,6 +80,13 @@ export default function BoneMappingModal({
     setDragSource(null)
   }
 
+  const toggleSource = name => setPickedSource(prev => (prev === name ? null : name))
+
+  // Bones to highlight in each 3D view: what the user is hovering in the list
+  // takes priority (so a hover flashes its location), else the current pick.
+  const sourceHighlight = hoverSource || pickedSource
+  const targetHighlight = hoverTarget || pickedTarget
+
   return (
     <div className="mesh-editor-bonemap__overlay" onClick={onClose}>
       <div className="mesh-editor-bonemap" onClick={e => e.stopPropagation()}>
@@ -74,8 +94,9 @@ export default function BoneMappingModal({
           <div>
             <h2 className="mesh-editor-bonemap__title">Map bones — {referenceLabel}</h2>
             <p className="mesh-editor-bonemap__subtitle">
-              Assign each animation (source) bone to a bone on your mesh (target). Drag a source
-              bone onto a target, or click a source then a target. {mappedCount} mapped.
+              Assign each animation (source) bone to a bone on your mesh (target). Rotate the 3D
+              views and click a bone to select it, drag a source bone onto a target, or click a
+              source then a target. {mappedCount} mapped.
             </p>
           </div>
           <button type="button" className="mesh-editor-bonemap__close" onClick={onClose} title="Close">
@@ -84,6 +105,24 @@ export default function BoneMappingModal({
         </div>
 
         <div className="mesh-editor-bonemap__body">
+          {/* 3D SKELETON VIEWS */}
+          <div className="mesh-editor-bonemap__views">
+            <BoneSkeletonView
+              title={`Source · ${referenceLabel}`}
+              skeleton={sourceSkeleton}
+              selectedBone={sourceHighlight}
+              mappedBones={mappedSources}
+              onSelectBone={toggleSource}
+            />
+            <BoneSkeletonView
+              title="Target · your mesh"
+              skeleton={targetSkeleton}
+              selectedBone={targetHighlight}
+              mappedBones={mappedTargets}
+              onSelectBone={handleTargetClick}
+            />
+          </div>
+
           {/* SOURCE column */}
           <div className="mesh-editor-bonemap__col">
             <div className="mesh-editor-bonemap__col-head">
@@ -106,7 +145,9 @@ export default function BoneMappingModal({
                     draggable
                     onDragStart={() => setDragSource(name)}
                     onDragEnd={() => setDragSource(null)}
-                    onClick={() => setPickedSource(pickedSource === name ? null : name)}
+                    onClick={() => toggleSource(name)}
+                    onMouseEnter={() => setHoverSource(name)}
+                    onMouseLeave={() => setHoverSource(null)}
                     title={used ? `${name} (mapped)` : name}
                   >
                     <span className="material-symbols-outlined mesh-editor-bonemap__grip">drag_indicator</span>
@@ -149,6 +190,8 @@ export default function BoneMappingModal({
                     key={name}
                     className={`mesh-editor-bonemap__target ${src ? 'mesh-editor-bonemap__target--mapped' : ''} ${pickedSource ? 'mesh-editor-bonemap__target--droppable' : ''}`}
                     onClick={() => handleTargetClick(name)}
+                    onMouseEnter={() => setHoverTarget(name)}
+                    onMouseLeave={() => setHoverTarget(null)}
                     onDragOver={e => e.preventDefault()}
                     onDrop={() => handleDrop(name)}
                   >

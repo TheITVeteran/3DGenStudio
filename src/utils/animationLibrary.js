@@ -103,6 +103,18 @@ export async function loadReferenceScene(referenceId) {
   }
 }
 
+// Load a reference species' clean skeleton-only rig (resources/rigs/rig-<dir>.glb)
+// for the bone-mapping 3D preview. These share the exact bone names of the
+// species' animation GLB but carry no skinned mesh, so they render as a tidy
+// armature. Returns { scene }; callers extract the skeleton from it.
+export async function loadReferenceRigScene(referenceId) {
+  const ref = getReference(referenceId)
+  if (!ref) throw new Error(`Unknown animation reference: ${referenceId}`)
+  const gltf = await loadGlbFromUrl(resourceUrl(`rigs/rig-${ref.dir}.glb`))
+  gltf.scene.updateMatrixWorld(true)
+  return { scene: gltf.scene }
+}
+
 // Load the user's rigged mesh as an animatable SkinnedMesh. Prefers the freshly
 // generated rig blob; falls back to (re)loading the mesh's source URL.
 export async function loadTargetScene({ riggedBuffer, modelUrl }) {

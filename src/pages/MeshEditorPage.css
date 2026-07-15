@@ -817,8 +817,8 @@
 .mesh-editor-bonemap {
   display: flex;
   flex-direction: column;
-  width: min(920px, 96vw);
-  height: min(720px, 90vh);
+  width: min(1240px, 96vw);
+  height: min(760px, 92vh);
   background: var(--surface-container, #1e1e22);
   border: 1px solid var(--outline-variant, #2a2a30);
   border-radius: 14px;
@@ -866,9 +866,85 @@
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  grid-template-columns: minmax(240px, 300px) 1fr auto 1fr;
   gap: 0.75rem;
   padding: 1rem 1.25rem;
+}
+
+/* Left column: two stacked 3D skeleton viewers (source over target). */
+.mesh-editor-bonemap__views {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-height: 0;
+}
+
+.mesh-editor-bonemap-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.mesh-editor-bonemap-view__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.mesh-editor-bonemap-view__title {
+  font-weight: 600;
+  font-size: 0.8rem;
+}
+
+.mesh-editor-bonemap-view__selected {
+  font-size: 0.72rem;
+  color: #8ff5ff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 55%;
+}
+
+.mesh-editor-bonemap-view__canvas {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  border: 1px solid var(--outline-variant, #2a2a30);
+  border-radius: 10px;
+  background:
+    radial-gradient(120% 120% at 50% 0%, rgba(108, 140, 255, 0.08), transparent 60%),
+    var(--surface, #141418);
+  overflow: hidden;
+}
+
+.mesh-editor-bonemap-view__empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--on-surface-variant);
+  font-size: 0.8rem;
+}
+
+.mesh-editor-bonemap-view__label-anchor {
+  pointer-events: none;
+}
+
+.mesh-editor-bonemap-view__label {
+  transform: translateY(-1.4rem);
+  padding: 0.15rem 0.45rem;
+  border-radius: 6px;
+  background: rgba(12, 14, 20, 0.9);
+  border: 1px solid rgba(143, 245, 255, 0.5);
+  color: #eaf7ff;
+  font-size: 0.72rem;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
 }
 
 .mesh-editor-bonemap__col {
