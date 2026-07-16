@@ -1251,27 +1251,56 @@ export default function GraphPage({ project }) {
         }
 
         const spawnAdditionalResultNodes = async (nodeTypeName, assets) => {
-          const sourceEdge = getInputSource(nodes, edges, targetNodeId, 'image').edge
+          // The first result is applied to the target node, which keeps its existing
+          // reference connection(s). Every additional result becomes a new node that
+          // must be wired up to the same reference node(s) so it can be used the same way.
+          // For an image workflow the target can reference several nodes, so replicate all
+          // of its incoming edges (preserving handles); Image Edit / Mesh Gen wire the
+          // single image input to their default handle.
+          const referenceEdges = nodeTypeName === 'Image'
+            ? edges
+                .filter(edge => edge.target === String(targetNodeId))
+                .map(edge => ({
+                  source: edge.source,
+                  inputId: edge.targetHandle || DEFAULT_INPUT_ID,
+                  outputId: edge.sourceHandle || DEFAULT_OUTPUT_ID
+                }))
+            : (() => {
+                const sourceEdge = getInputSource(nodes, edges, targetNodeId, 'image').edge
+                return sourceEdge
+                  ? [{
+                      source: sourceEdge.source,
+                      inputId: DEFAULT_INPUT_ID,
+                      outputId: sourceEdge.sourceHandle || DEFAULT_OUTPUT_ID
+                    }]
+                  : []
+              })()
+          // Stack the additional nodes in a single vertical column directly below the
+          // target node (which holds the first result). Use a fixed step: a collapsed
+          // image/mesh card is a fixed-size 360px-wide, ~480px-tall card, and the target
+          // node's live measured height is unreliable here (it's still in its taller
+          // processing layout when this runs).
           const baseX = targetNode.position.x
           const baseY = targetNode.position.y
+          const verticalStep = 580
           for (let index = 0; index < assets.length; index += 1) {
             const asset = assets[index]
             const createdNode = await handleCreateNode(nodeTypeName, {
               name: asset.name || nodeTypeName,
               assetId: asset.id,
-              xPos: baseX + 360,
-              yPos: baseY + ((index + 1) * 140),
+              xPos: baseX,
+              yPos: baseY + ((index + 1) * verticalStep),
               metadata: {
                 createdFromNodeId: Number(targetNodeId)
               }
             })
 
-            if ((nodeTypeName === 'Image Edit' || nodeTypeName === 'Mesh Gen') && sourceEdge) {
+            for (const referenceEdge of referenceEdges) {
               const newConnection = await createProjectConnection(project.id, {
-                sourceNodeId: Number(sourceEdge.source),
+                sourceNodeId: Number(referenceEdge.source),
                 targetNodeId: createdNode.id,
-                inputId: DEFAULT_INPUT_ID,
-                outputId: sourceEdge.sourceHandle || DEFAULT_OUTPUT_ID
+                inputId: referenceEdge.inputId,
+                outputId: referenceEdge.outputId
               })
 
               setEdges(currentEdges => {
@@ -2389,15 +2418,20 @@ export default function GraphPage({ project }) {
         }
 
         const spawnAdditionalResultNodes = async (nodeTypeName, assets) => {
+          // Stack the additional nodes in a single vertical column directly below the
+          // target node (which holds the first result). Use a fixed step matching the
+          // collapsed fixed-size card (~480px tall) plus a gap; the target's live
+          // measured height is unreliable here (it's still in its taller processing layout).
           const baseX = targetNode.position.x
           const baseY = targetNode.position.y
+          const verticalStep = 580
           for (let index = 0; index < assets.length; index += 1) {
             const asset = assets[index]
             await handleCreateNode(nodeTypeName, {
               name: asset.name || nodeTypeName,
               assetId: asset.id,
-              xPos: baseX + 360,
-              yPos: baseY + ((index + 1) * 140),
+              xPos: baseX,
+              yPos: baseY + ((index + 1) * verticalStep),
               metadata: {
                 createdFromNodeId: Number(targetNodeId)
               }
