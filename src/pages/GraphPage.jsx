@@ -137,7 +137,8 @@ export default function GraphPage({ project }) {
     runMeshGenerationApi,
     queryTencentMeshGenerationResult,
     queryTripoMeshGenerationResult,
-    queryHitemMeshGenerationResult
+    queryHitemMeshGenerationResult,
+    saveGraphViewport
   } = useProjects()
   const { settings } = useSettings()
   const { addNotification } = useNotifications()
@@ -171,6 +172,7 @@ export default function GraphPage({ project }) {
   const workflowsLoadedRef = useRef(false)
   const graphCanvasRef = useRef(null)
   const hasAutoFitOnLoadRef = useRef(false)
+  const viewportSaveTimeoutRef = useRef(null)
 
   const pushMeshGenerationFailureNotification = useCallback((message, source = 'Mesh generation API') => {
     addNotification({
@@ -2824,6 +2826,33 @@ export default function GraphPage({ project }) {
     )
   }, [handleDeleteConnection])
 
+  // Persist the canvas pan + zoom (debounced) whenever the user finishes panning
+  // or zooming, so reopening the project restores the exact same view.
+  const handleMoveEnd = useCallback((_event, viewport) => {
+    // Ignore programmatic moves during initial load positioning; only persist
+    // once the load-time viewport decision (restore / fit / focus) has run.
+    if (!hasAutoFitOnLoadRef.current || !viewport) {
+      return
+    }
+    if (viewportSaveTimeoutRef.current) {
+      window.clearTimeout(viewportSaveTimeoutRef.current)
+    }
+    viewportSaveTimeoutRef.current = window.setTimeout(() => {
+      viewportSaveTimeoutRef.current = null
+      saveGraphViewport(project.id, {
+        x: viewport.x,
+        y: viewport.y,
+        zoom: viewport.zoom
+      })
+    }, 500)
+  }, [project.id, saveGraphViewport])
+
+  useEffect(() => () => {
+    if (viewportSaveTimeoutRef.current) {
+      window.clearTimeout(viewportSaveTimeoutRef.current)
+    }
+  }, [])
+
   const renderedEdges = useMemo(() => edges.map(edge => ({
     ...edge,
     data: {
@@ -2939,6 +2968,33 @@ export default function GraphPage({ project }) {
 
     hasAutoFitOnLoadRef.current = true
 
+    // Prefer the last saved viewport (pan + zoom) so reopening a project lands
+    // exactly where the user left off, instead of a generic fit-all-nodes.
+    const savedViewport = project?.graphViewport
+    const hasSavedViewport = savedViewport
+      && Number.isFinite(savedViewport.x)
+      && Number.isFinite(savedViewport.y)
+      && Number.isFinite(savedViewport.zoom)
+
+    if (hasSavedViewport) {
+      const restoreViewport = () => {
+        try {
+          reactFlowInstance.setViewport(
+            { x: savedViewport.x, y: savedViewport.y, zoom: savedViewport.zoom },
+            { duration: 0 }
+          )
+        } catch {
+          // Instance torn down before this fired (e.g. StrictMode remount).
+        }
+      }
+      const frameId = window.requestAnimationFrame(restoreViewport)
+      const timeoutId = window.setTimeout(restoreViewport, 220)
+      return () => {
+        window.cancelAnimationFrame(frameId)
+        window.clearTimeout(timeoutId)
+      }
+    }
+
     const fitWorkflow = () => {
       reactFlowInstance.fitView({
         padding: 0.18,
@@ -2958,7 +3014,7 @@ export default function GraphPage({ project }) {
       window.cancelAnimationFrame(frameId)
       window.clearTimeout(timeoutId)
     }
-  }, [edges.length, loading, nodes.length, project.id, reactFlowInstance, location.state?.focusTargetId])
+  }, [edges.length, loading, nodes.length, project.id, project?.graphViewport, reactFlowInstance, location.state?.focusTargetId])
 
   // Deep-link focus: when the user clicks a workflow notification, the Header
   // navigates here with a focus target in router state. Once the graph and its
@@ -3122,6 +3178,7 @@ export default function GraphPage({ project }) {
               onDragOver={handleCanvasFileDragOver}
               onDrop={handleCanvasFileDrop}
               onNodeDragStop={handleNodeDragStop}
+              onMoveEnd={handleMoveEnd}
               onEdgesDelete={handleEdgesDelete}
               defaultViewport={{ x: 0, y: 0, zoom: 0.9 }}
               minZoom={0.2}

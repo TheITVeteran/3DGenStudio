@@ -379,7 +379,8 @@ function mapProjectRow(row) {
     description: row.description || '',
     preset: row.preset || '',
     createdAt: row.creationDate,
-    status: row.status || 'active'
+    status: row.status || 'active',
+    graphViewport: parseJson(row.graphViewport, null)
   };
 }
 
@@ -1070,6 +1071,11 @@ export async function initializeStorage() {
 
   if (!assetColumns.some(column => column.name === 'parentId')) {
     await run(db, 'ALTER TABLE Assets ADD COLUMN parentId INTEGER');
+  }
+
+  const projectColumns = await all(db, 'PRAGMA table_info(Projects)');
+  if (!projectColumns.some(column => column.name === 'graphViewport')) {
+    await run(db, 'ALTER TABLE Projects ADD COLUMN graphViewport TEXT');
   }
 
   await run(db, 'CREATE INDEX IF NOT EXISTS idx_assets_parentId ON Assets(parentId)');
@@ -1848,6 +1854,10 @@ export async function updateProject(projectId, updates = {}) {
   if (updates.description !== undefined) { fields.push('description = ?'); values.push(updates.description); }
   if (updates.preset !== undefined) { fields.push('preset = ?'); values.push(updates.preset); }
   if (updates.status !== undefined) { fields.push('status = ?'); values.push(updates.status); }
+  if (updates.graphViewport !== undefined) {
+    fields.push('graphViewport = ?');
+    values.push(updates.graphViewport === null ? null : JSON.stringify(updates.graphViewport));
+  }
 
   if (fields.length > 0) {
     values.push(projectId);

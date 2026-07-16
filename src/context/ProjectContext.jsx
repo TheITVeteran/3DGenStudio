@@ -456,6 +456,20 @@ export function ProjectProvider({ children }) {
     }
   }
 
+  // Persist the Graph canvas viewport (pan + zoom) without triggering a full
+  // projects refetch — this fires on every pan/zoom end, so it must stay cheap.
+  const saveGraphViewport = async (id, viewport) => {
+    try {
+      await fetch(`${API_BASE}/projects/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ graphViewport: viewport })
+      })
+    } catch (err) {
+      console.error('Failed to save graph viewport:', err)
+    }
+  }
+
   const deleteProject = async (id, { deleteAssets = false } = {}) => {
     const query = deleteAssets ? '?deleteAssets=true' : ''
     await fetch(`${API_BASE}/projects/${id}${query}`, { method: 'DELETE' })
@@ -1169,6 +1183,7 @@ export function ProjectProvider({ children }) {
       loading,
       createProject,
       updateProject,
+      saveGraphViewport,
       getProject,
       deleteProject,
       exportProject,
